@@ -17,6 +17,12 @@ class Recommendation:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AutoAssignmentResult:
+    assigned: int
+    skipped: int
+
+
 class ClassificationService:
     MAX_DEPTH = 3
 
@@ -141,6 +147,26 @@ class ClassificationService:
         if recommendation is None:
             raise ValueError("当前文档没有可接受的分类建议")
         self.assign(document_id, recommendation.category_id, needs_review=automatic)
+
+    def auto_assign_unclassified(self, *, threshold: str = "high") -> AutoAssignmentResult:
+        minimum_scores = {"low": 1.0, "medium": 2.0, "high": 3.0}
+        if threshold not in minimum_scores:
+            raise ValueError("自动分类可信度必须是 low、medium 或 high")
+        rows = self.database.connection.execute(
+            """
+            SELECT id FROM documents
+            WHERE status = 'active' AND category_id IS NULL AND content_text IS NOT NULL
+            """
+        ).fetchall()
+        assigned = skipped = 0
+        for row in rows:
+            recommendation = self.recommend(row[0])
+            if recommendation is None or recommendation.score < minimum_scores[threshold]:
+                skipped += 1
+                continue
+            self.accept_recommendation(row[0], recommendation, automatic=True)
+            assigned += 1
+        return AutoAssignmentResult(assigned, skipped)
 
     def _depth(self, category_id: str) -> int:
         depth = 1

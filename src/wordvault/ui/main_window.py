@@ -102,11 +102,14 @@ class MainWindow(QMainWindow):
         export_diagnostics.clicked.connect(self._choose_diagnostics_destination)
         clear_logs = QPushButton("清除日志", objectName="navButton")
         clear_logs.clicked.connect(self._clear_diagnostics)
+        empty_trash = QPushButton("清空回收站", objectName="navButton")
+        empty_trash.clicked.connect(self._empty_trash)
         migrate_library = QPushButton("迁移资料库", objectName="navButton")
         migrate_library.clicked.connect(self._choose_library_migration)
         sidebar_layout.addWidget(migrate_library)
         sidebar_layout.addWidget(export_diagnostics)
         sidebar_layout.addWidget(clear_logs)
+        sidebar_layout.addWidget(empty_trash)
         location = QLabel("资料存储于本机", objectName="localOnly")
         location.setWordWrap(True)
         sidebar_layout.addWidget(location)
@@ -175,6 +178,14 @@ class MainWindow(QMainWindow):
         delete_category_button.clicked.connect(self._delete_selected_category)
         recommend_button = QPushButton("推荐分类", objectName="primaryButton")
         recommend_button.clicked.connect(self._recommend_category)
+        export_category_button = QPushButton("导出本分类", objectName="secondaryButton")
+        export_category_button.clicked.connect(self._choose_category_export)
+        self.auto_threshold = QComboBox(objectName="searchFilter")
+        self.auto_threshold.addItem("高可信度", "high")
+        self.auto_threshold.addItem("中可信度", "medium")
+        self.auto_threshold.addItem("低可信度", "low")
+        auto_classify_button = QPushButton("自动归类", objectName="secondaryButton")
+        auto_classify_button.clicked.connect(self._auto_classify)
         actions.addWidget(import_button)
         actions.addWidget(folder_button)
         actions.addWidget(open_button)
@@ -192,6 +203,9 @@ class MainWindow(QMainWindow):
         classification_actions.addWidget(edit_category_button)
         classification_actions.addWidget(delete_category_button)
         classification_actions.addWidget(recommend_button)
+        classification_actions.addWidget(export_category_button)
+        classification_actions.addWidget(self.auto_threshold)
+        classification_actions.addWidget(auto_classify_button)
         classification_actions.addStretch()
         content_layout.addLayout(classification_actions)
         content_layout.addSpacing(18)
@@ -673,6 +687,27 @@ class MainWindow(QMainWindow):
             )
             self.category_combo.setCurrentIndex(index)
 
+    def _auto_classify(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "自动归类未分类文档",
+            "符合可信度要求的文档将自动归类，并进入“待复核”。是否继续？",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        result = self.classification_service.auto_assign_unclassified(
+            threshold=self.auto_threshold.currentData()
+        )
+        self.diagnostics.record(
+            "AUTO_CLASSIFY_COMPLETED", count=result.assigned, status="completed"
+        )
+        QMessageBox.information(
+            self,
+            "自动归类完成",
+            f"已归类 {result.assigned} 份，跳过 {result.skipped} 份。请在“待复核”中检查。",
+        )
+        self._show_needs_review()
+
     def _choose_export_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "选择导出位置")
         if selected:
@@ -766,6 +801,43 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(self, "清除日志", "确定清除全部本地诊断日志吗？")
         if answer == QMessageBox.StandardButton.Yes:
             self.diagnostics.clear()
+
+    def _empty_trash(self) -> None:
+        count = self.database.connection.execute(
+            "SELECT count(*) FROM documents WHERE status = 'trash'"
+        ).fetchone()[0]
+        if not count:
+            QMessageBox.information(self, "回收站", "回收站为空。")
+            return
+        answer = QMessageBox.warning(
+            self,
+            "永久删除",
+            f"将永久删除回收站中的 {count} 份文档，且无法恢复。确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.lifecycle_service.empty_trash()
+            self._show_trash()
+
+    def _choose_category_export(self) -> None:
+        category_id = self.category_combo.currentData()
+        if category_id is None:
+            QMessageBox.information(self, "导出分类", "请先选择一个具体分类。")
+            return
+        selected = QFileDialog.getExistingDirectory(self, "选择分类导出位置")
+        if not selected:
+            return
+        exported = self.export_service.export_category(
+            category_id,
+            Path(selected),
+            decision=ExportConflictDecision.AUTO_RENAME,
+        )
+        QMessageBox.information(
+            self,
+            "分类导出完成",
+            f"已导出 {len(exported)} 份文档；同名文件已自动重命名。",
+        )
 
     def _scan_external_changes(self) -> None:
         if self.indexing_job.state in (IndexingState.RUNNING, IndexingState.PAUSED):

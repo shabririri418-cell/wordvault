@@ -52,6 +52,28 @@ class ExportService:
         os.replace(temporary, destination)
         return destination
 
+    def export_category(
+        self,
+        category_id: str,
+        destination_directory: Path,
+        *,
+        decision: ExportConflictDecision = ExportConflictDecision.SKIP,
+    ) -> list[Path]:
+        rows = self.database.connection.execute(
+            """
+            SELECT id FROM documents
+            WHERE category_id = ? AND status = 'active'
+            ORDER BY imported_at
+            """,
+            (category_id,),
+        ).fetchall()
+        exported = []
+        for row in rows:
+            path = self.export_document(row[0], destination_directory, decision=decision)
+            if path is not None:
+                exported.append(path)
+        return exported
+
     @staticmethod
     def _available_name(destination: Path) -> Path:
         number = 2
@@ -60,4 +82,3 @@ class ExportService:
             if not candidate.exists():
                 return candidate
             number += 1
-

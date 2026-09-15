@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from wordvault.classification.service import ClassificationService
 from wordvault.library.exporter import ExportConflictDecision, ExportService
 from wordvault.library.importer import ImportService
 from wordvault.library.lifecycle import LibraryLifecycleService
@@ -63,3 +64,24 @@ def test_consistency_check_reports_missing_and_unknown_files(tmp_path: Path) -> 
     assert report.missing_document_ids == (record.document_id,)
     assert report.unknown_file_names == ("unknown.docx",)
 
+
+def test_exports_an_entire_category(tmp_path: Path) -> None:
+    first = tmp_path / "甲.docx"
+    second = tmp_path / "乙.doc"
+    first.write_bytes(b"one")
+    second.write_bytes(b"two")
+    destination = tmp_path / "分类导出"
+    destination.mkdir()
+    with LibraryDatabase.open(tmp_path / "资料库") as database:
+        first_record = ImportService(database).import_file(first)
+        second_record = ImportService(database).import_file(second)
+        categories = ClassificationService(database)
+        category = categories.create_category("合同")
+        categories.assign(first_record.document_id, category)
+        categories.assign(second_record.document_id, category)
+
+        exported = ExportService(database).export_category(
+            category, destination, decision=ExportConflictDecision.AUTO_RENAME
+        )
+
+    assert {path.name for path in exported} == {"甲.docx", "乙.doc"}

@@ -105,3 +105,33 @@ def test_updates_category_name_and_keywords(tmp_path: Path) -> None:
     assert recommendation is not None
     assert recommendation.category_id == category
     assert recommendation.confidence == "high"
+
+
+def test_batch_auto_assignment_respects_confidence_threshold(tmp_path: Path) -> None:
+    high_source = tmp_path / "高.docx"
+    low_source = tmp_path / "低.docx"
+    high_source.write_bytes(b"high")
+    low_source.write_bytes(b"low")
+    with LibraryDatabase.open(tmp_path / "资料库") as database:
+        high = ImportService(database).import_file(high_source)
+        low = ImportService(database).import_file(low_source)
+        database.connection.execute(
+            "UPDATE documents SET content_text = '终端 安全 保密' WHERE id = ?", (high.document_id,)
+        )
+        database.connection.execute(
+            "UPDATE documents SET content_text = '终端' WHERE id = ?", (low.document_id,)
+        )
+        database.connection.commit()
+        service = ClassificationService(database)
+        category = service.create_category("安全", keywords=("终端", "安全", "保密"))
+
+        result = service.auto_assign_unclassified(threshold="high")
+        rows = database.connection.execute(
+            "SELECT id, category_id, needs_review FROM documents ORDER BY id"
+        ).fetchall()
+
+    by_id = {row[0]: tuple(row[1:]) for row in rows}
+    assert result.assigned == 1
+    assert result.skipped == 1
+    assert by_id[high.document_id] == (category, 1)
+    assert by_id[low.document_id] == (None, 0)

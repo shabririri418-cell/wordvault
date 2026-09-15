@@ -39,4 +39,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "ARM64 模拟构建失败，请保留终端输出用于诊断。"
 }
 
+Copy-Item -Force `
+    (Join-Path $ProjectRoot "packaging/install-offline.sh") `
+    (Join-Path $OutputPath "install-offline.sh")
+$PackagePath = Join-Path $OutputPath "wordvault_0.1.0_arm64.deb"
+$PackageHash = (Get-FileHash -Algorithm SHA256 $PackagePath).Hash.ToLowerInvariant()
+Set-Content -Encoding ascii `
+    -Path (Join-Path $OutputPath "SHA256SUMS") `
+    -Value "$PackageHash  wordvault_0.1.0_arm64.deb"
+
 Write-Host "ARM64 安装包已输出到 $OutputPath"

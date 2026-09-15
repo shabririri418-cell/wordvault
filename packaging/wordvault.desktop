@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=文澜资料库
+Comment=完全离线的 Word 文档管理工具
+Exec=/opt/wordvault/WordVault
+Icon=wordvault
+Terminal=false
+Categories=Office;Utility;
+

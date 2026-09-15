@@ -8,15 +8,24 @@ fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+build_requirements="${BUILD_REQUIREMENTS:-requirements-build.txt}"
 
 python3 -m venv .venv-build
 .venv-build/bin/python -m pip install \
-  --no-index --find-links vendor/wheels -r requirements-build.txt
+  --no-index --find-links vendor/wheels -r "$build_requirements"
 .venv-build/bin/python -m pytest -q
 .venv-build/bin/python -m ruff check .
 .venv-build/bin/pyinstaller \
   --noconfirm --clean --windowed --onedir \
   --name WordVault --paths src src/wordvault/__main__.py
+
+verification_root="$(mktemp -d)"
+trap 'rm -rf -- "$verification_root"' EXIT
+dist/WordVault/WordVault \
+  --self-check \
+  --library-root "$verification_root" \
+  --output "$verification_root/self-check.zip"
+test -s "$verification_root/self-check.zip"
 
 stage="$project_root/build/deb-root"
 if [[ -d "$stage" ]]; then

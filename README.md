@@ -32,7 +32,7 @@ python -m ruff check .
 
 ## AArch64 离线构建
 
-必须在银河麒麟或兼容的 AArch64 Linux 构建机上执行：
+推荐在银河麒麟或兼容的 AArch64 Linux 构建机上执行：
 
 ```bash
 python3 -m pip download --dest vendor/wheels -r requirements-build.txt
@@ -40,6 +40,23 @@ python3 -m pip download --dest vendor/wheels -r requirements-build.txt
 ```
 
 客户电脑只接收生成的 `.deb`，不需要联网安装 Python 包。
+
+没有 ARM64 电脑时，可在已启动 Docker Desktop 的 Windows 电脑上通过 QEMU 模拟构建：
+
+```powershell
+./packaging/build-arm64-docker.ps1
+```
+
+安装包输出到 `dist/arm64`。该流程使用 Debian 11/glibc 2.31 基线和 PySide6 6.8，
+用于降低旧版银河麒麟的运行库兼容风险。Docker 模拟构建不能替代客户电脑上的最终确认。
+
+客户可离线执行自检并生成脱敏诊断包：
+
+```bash
+/opt/wordvault/WordVault --self-check \
+  --library-root /实际资料库目录 \
+  --output wordvault-diagnostics.zip
+```
 
 ## 隐私边界
 

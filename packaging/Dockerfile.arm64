@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+FROM --platform=$TARGETPLATFORM python:3.11-bullseye AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    QT_QPA_PLATFORM=offscreen \
+    BUILD_REQUIREMENTS=requirements-build-arm64.txt
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        binutils \
+        libdbus-1-3 \
+        libfontconfig1 \
+        libglib2.0-0 \
+        libx11-6 \
+        libx11-xcb1 \
+        libxcb1 \
+        libxext6 \
+        libxi6 \
+        libxkbcommon0 \
+        libxkbcommon-x11-0 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . .
+RUN mkdir -p vendor/wheels \
+    && python -m pip download --dest vendor/wheels -r "$BUILD_REQUIREMENTS" \
+    && chmod +x packaging/build-deb.sh \
+    && packaging/build-deb.sh \
+    && mkdir -p /artifacts \
+    && cp dist/wordvault_*_arm64.deb /artifacts/
+
+FROM scratch AS artifact
+COPY --from=builder /artifacts/ /

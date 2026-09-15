@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -846,7 +847,13 @@ class MainWindow(QMainWindow):
     def _scan_external_changes(self) -> None:
         if self.indexing_job.state in (IndexingState.RUNNING, IndexingState.PAUSED):
             return
-        result = self.change_monitor.scan()
+        try:
+            result = self.change_monitor.scan()
+        except sqlite3.ProgrammingError as error:
+            if "closed" not in str(error).lower():
+                raise
+            self.change_timer.stop()
+            return
         if result.changed:
             self.index_status.setText(f"已更新 {result.changed} 份在 WPS 中修改的文档")
             self._load_documents()

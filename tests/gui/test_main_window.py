@@ -88,6 +88,17 @@ def test_main_window_exports_sanitized_diagnostics(qtbot, tmp_path: Path) -> Non
     database.close()
 
 
+def test_change_timer_stops_if_database_was_closed(qtbot, tmp_path: Path) -> None:
+    database = LibraryDatabase.open(tmp_path / "资料库")
+    window = MainWindow(database)
+    qtbot.addWidget(window)
+    database.close()
+
+    window._scan_external_changes()
+
+    assert window.change_timer.isActive() is False
+
+
 def test_main_window_imports_lists_and_previews_docx(qtbot, tmp_path: Path) -> None:
     source = tmp_path / "管理制度.docx"
     with zipfile.ZipFile(source, "w") as package:

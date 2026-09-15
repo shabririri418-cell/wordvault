@@ -18,3 +18,7 @@ def test_self_check_cli_creates_requested_diagnostic_package(tmp_path: Path) -> 
 
 def test_gui_smoke_check_loads_qt_without_opening_the_main_window() -> None:
     assert main(["--gui-smoke-test"]) == 0
+
+
+def test_window_smoke_check_constructs_the_complete_main_window() -> None:
+    assert main(["--window-smoke-test"]) == 0

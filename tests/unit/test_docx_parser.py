@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from wordvault.content.parsers import DocxParser, ParseError
+from wordvault.content.parsers import DocxParser, LegacyDocParser, ParseError
 
 
 def make_docx(path: Path, body_xml: str) -> None:
@@ -42,3 +42,21 @@ def test_reports_corrupt_docx_with_stable_error_code(tmp_path: Path) -> None:
 
     assert error.value.code == "DOCX_INVALID"
 
+
+def test_legacy_doc_parser_prefers_local_tika_without_using_a_shell(tmp_path: Path) -> None:
+    java = tmp_path / "java"
+    tika = tmp_path / "tika-app.jar"
+    document = tmp_path / "旧格式.doc"
+    java.write_bytes(b"")
+    tika.write_bytes(b"")
+    document.write_bytes(b"")
+
+    command = LegacyDocParser(tika_jar=tika, java_executable=java).build_command(document)
+
+    assert command == [
+        str(java.resolve()),
+        "-jar",
+        str(tika.resolve()),
+        "--text",
+        str(document.resolve()),
+    ]

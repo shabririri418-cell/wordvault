@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 
 from wordvault.storage.database import LibraryDatabase
 
@@ -69,6 +70,7 @@ class SearchService:
         *,
         category_id: str | None = None,
         extension: str | None = None,
+        imported_after: datetime | None = None,
         limit: int = 100,
     ) -> list[SearchResult]:
         query = query.strip()
@@ -76,22 +78,29 @@ class SearchService:
             return []
         if self.fts_available and len(query) >= 3:
             try:
-                rows = self._fts_search(query, category_id, extension, limit)
+                rows = self._fts_search(query, category_id, extension, imported_after, limit)
             except sqlite3.DatabaseError:
-                rows = self._fallback_search(query, category_id, extension, limit)
+                rows = self._fallback_search(
+                    query, category_id, extension, imported_after, limit
+                )
         else:
-            rows = self._fallback_search(query, category_id, extension, limit)
+            rows = self._fallback_search(query, category_id, extension, imported_after, limit)
         return [
             SearchResult(row[0], row[1], self._highlight(row[2] or row[1], query), float(row[3]))
             for row in rows
         ]
 
     def _fts_search(
-        self, query: str, category_id: str | None, extension: str | None, limit: int
+        self,
+        query: str,
+        category_id: str | None,
+        extension: str | None,
+        imported_after: datetime | None,
+        limit: int,
     ):
         clauses = ["documents_fts MATCH ?", "d.status = 'active'"]
         parameters: list[object] = [f'"{query.replace(chr(34), chr(34) * 2)}"']
-        self._add_filters(clauses, parameters, category_id, extension)
+        self._add_filters(clauses, parameters, category_id, extension, imported_after)
         parameters.append(limit)
         return self.database.connection.execute(
             f"""
@@ -106,7 +115,12 @@ class SearchService:
         ).fetchall()
 
     def _fallback_search(
-        self, query: str, category_id: str | None, extension: str | None, limit: int
+        self,
+        query: str,
+        category_id: str | None,
+        extension: str | None,
+        imported_after: datetime | None,
+        limit: int,
     ):
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
@@ -116,7 +130,9 @@ class SearchService:
             "(original_name LIKE ? ESCAPE '\\' OR content_text LIKE ? ESCAPE '\\')",
         ]
         where_parameters: list[object] = [pattern, pattern]
-        self._add_filters(clauses, where_parameters, category_id, extension)
+        self._add_filters(
+            clauses, where_parameters, category_id, extension, imported_after
+        )
         parameters: list[object] = [query, *where_parameters, limit]
         return self.database.connection.execute(
             f"""
@@ -136,6 +152,7 @@ class SearchService:
         parameters: list[object],
         category_id: str | None,
         extension: str | None,
+        imported_after: datetime | None,
     ) -> None:
         if category_id is not None:
             category_field = (
@@ -147,6 +164,12 @@ class SearchService:
             field = "d.original_name" if clauses[0].startswith("documents_fts") else "original_name"
             clauses.append(f"lower({field}) LIKE ?")
             parameters.append(f"%{extension.casefold()}")
+        if imported_after is not None:
+            imported_field = (
+                "d.imported_at" if clauses[0].startswith("documents_fts") else "imported_at"
+            )
+            clauses.append(f"{imported_field} >= ?")
+            parameters.append(imported_after.isoformat())
 
     def _ensure_fts_table(self) -> bool:
         try:

@@ -33,7 +33,7 @@
 ## Phase 3: document-content
 
 - [x] Task 8: `.docx`正文提取和解析失败隔离
-- [ ] Task 9: `.doc`适配器与WPS/本地工具回退
+- [x] Task 9: `.doc`适配器与WPS/本地工具回退
 - [x] Task 10: 阅读预览、复制和来源引用
 
 ## Phase 4: classification

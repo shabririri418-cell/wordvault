@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from wordvault.classification.service import ClassificationService
@@ -53,3 +54,23 @@ def test_short_chinese_query_uses_safe_fallback(tmp_path: Path) -> None:
         results = search.search("终端")
 
     assert [result.document_id for result in results] == [document.document_id]
+
+
+def test_filters_by_import_time(tmp_path: Path) -> None:
+    with LibraryDatabase.open(tmp_path / "资料库") as database:
+        old = add_document(database, tmp_path / "旧.docx", "相同检索内容")
+        recent = add_document(database, tmp_path / "新.docx", "相同检索内容")
+        database.connection.execute(
+            "UPDATE documents SET imported_at = ? WHERE id = ?",
+            ((datetime.now(UTC) - timedelta(days=90)).isoformat(), old.document_id),
+        )
+        database.connection.commit()
+        search = SearchService(database)
+        search.rebuild()
+
+        results = search.search(
+            "相同检索",
+            imported_after=datetime.now(UTC) - timedelta(days=30),
+        )
+
+    assert [result.document_id for result in results] == [recent.document_id]

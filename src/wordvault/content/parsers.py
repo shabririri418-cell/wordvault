@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
@@ -56,18 +57,27 @@ class DocxParser:
 class LegacyDocParser:
     """Extract legacy Word text using an available local, non-network tool."""
 
-    def __init__(self, commands: tuple[str, ...] = ("antiword", "catdoc")) -> None:
+    def __init__(
+        self,
+        commands: tuple[str, ...] = ("antiword", "catdoc"),
+        *,
+        tika_jar: Path | None = None,
+        java_executable: Path | None = None,
+    ) -> None:
         self.commands = commands
+        self.tika_jar = tika_jar
+        self.java_executable = java_executable
 
     def parse(self, path: Path) -> ParsedContent:
-        executable = next(
-            (shutil.which(command) for command in self.commands if shutil.which(command)), None
-        )
-        if executable is None:
-            raise ParseError("DOC_PARSER_UNAVAILABLE", "当前系统没有可用的旧版 Word 解析组件")
+        try:
+            command = self.build_command(path)
+        except FileNotFoundError as error:
+            raise ParseError(
+                "DOC_PARSER_UNAVAILABLE", "当前系统没有可用的旧版 Word 解析组件"
+            ) from error
         try:
             completed = subprocess.run(
-                [executable, str(path)],
+                command,
                 check=False,
                 capture_output=True,
                 timeout=120,
@@ -79,6 +89,40 @@ class LegacyDocParser:
         text = self._decode(completed.stdout)
         paragraphs = tuple(line.strip() for line in text.splitlines() if line.strip())
         return ParsedContent("\n".join(paragraphs), paragraphs)
+
+    def build_command(self, path: Path) -> list[str]:
+        path = path.expanduser().resolve()
+        tika = self.tika_jar.resolve() if self.tika_jar and self.tika_jar.is_file() else None
+        if tika is None:
+            tika = next(
+                (candidate for candidate in self._tika_candidates() if candidate.is_file()), None
+            )
+        java = (
+            self.java_executable.resolve()
+            if self.java_executable and self.java_executable.is_file()
+            else self._detected_java()
+        )
+        if tika is not None and java is not None:
+            return [str(java), "-jar", str(tika), "--text", str(path)]
+        executable = next(
+            (shutil.which(command) for command in self.commands if shutil.which(command)), None
+        )
+        if executable is None:
+            raise FileNotFoundError("没有可用的旧版 Word 解析组件")
+        return [executable, str(path)]
+
+    @staticmethod
+    def _tika_candidates() -> tuple[Path, ...]:
+        executable_root = Path(sys.executable).resolve().parent
+        return (
+            executable_root / "resources" / "tika-app.jar",
+            Path("/opt/wordvault/resources/tika-app.jar"),
+        )
+
+    @staticmethod
+    def _detected_java() -> Path | None:
+        executable = shutil.which("java")
+        return Path(executable).resolve() if executable else None
 
     @staticmethod
     def _decode(content: bytes) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
@@ -123,7 +124,28 @@ class MainWindow(QMainWindow):
         self.search_input.returnPressed.connect(self._search)
         header.addWidget(self.search_input)
         content_layout.addLayout(header)
-        content_layout.addSpacing(22)
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("筛选", objectName="fieldLabel"))
+        self.search_category_combo = QComboBox(objectName="searchFilter")
+        self.search_category_combo.setMinimumWidth(145)
+        self.format_filter = QComboBox(objectName="searchFilter")
+        self.format_filter.addItem("全部格式", None)
+        self.format_filter.addItem("DOCX", ".docx")
+        self.format_filter.addItem("DOC", ".doc")
+        self.time_filter = QComboBox(objectName="searchFilter")
+        self.time_filter.addItem("全部时间", None)
+        self.time_filter.addItem("最近7天", 7)
+        self.time_filter.addItem("最近30天", 30)
+        self.time_filter.addItem("最近一年", 365)
+        search_button = QPushButton("搜索", objectName="secondaryButton")
+        search_button.clicked.connect(self._search)
+        filters.addWidget(self.search_category_combo)
+        filters.addWidget(self.format_filter)
+        filters.addWidget(self.time_filter)
+        filters.addWidget(search_button)
+        filters.addStretch()
+        content_layout.addLayout(filters)
+        content_layout.addSpacing(18)
 
         actions = QHBoxLayout()
         import_button = QPushButton("导入文档", objectName="primaryButton")
@@ -237,7 +259,7 @@ class MainWindow(QMainWindow):
                 border-radius: 7px; padding: 10px 13px; font-size: 14px;
             }
             QLineEdit#searchInput:focus { border-color: #147D64; }
-            QComboBox#categoryCombo {
+            QComboBox#categoryCombo, QComboBox#searchFilter {
                 background: white; color: #294251; border: 1px solid #CBD6DC;
                 border-radius: 6px; padding: 9px 12px; font-size: 14px;
             }
@@ -410,7 +432,14 @@ class MainWindow(QMainWindow):
         if not query:
             self._load_documents()
             return
-        results = self.search_service.search(query)
+        days = self.time_filter.currentData()
+        imported_after = datetime.now(UTC) - timedelta(days=days) if days else None
+        results = self.search_service.search(
+            query,
+            category_id=self.search_category_combo.currentData(),
+            extension=self.format_filter.currentData(),
+            imported_after=imported_after,
+        )
         self._load_documents([result.document_id for result in results])
 
     def _resolve_duplicate(self, path: Path, conflict: DuplicateConflict):
@@ -508,9 +537,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_categories(self) -> None:
         current = self.category_combo.currentData() if self.category_combo.count() else None
+        search_current = (
+            self.search_category_combo.currentData() if self.search_category_combo.count() else None
+        )
         self.category_combo.blockSignals(True)
+        self.search_category_combo.blockSignals(True)
         self.category_combo.clear()
+        self.search_category_combo.clear()
         self.category_combo.addItem("未分类", None)
+        self.search_category_combo.addItem("全部分类", None)
         rows = self.database.connection.execute(
             "SELECT id, name, parent_id FROM categories ORDER BY name"
         ).fetchall()
@@ -521,12 +556,16 @@ class MainWindow(QMainWindow):
         def add_children(parent_id: str | None, depth: int) -> None:
             for category_id, name in by_parent.get(parent_id, []):
                 self.category_combo.addItem(f"{'　' * depth}{name}", category_id)
+                self.search_category_combo.addItem(f"{'　' * depth}{name}", category_id)
                 add_children(category_id, depth + 1)
 
         add_children(None, 0)
         found = self.category_combo.findData(current)
+        search_found = self.search_category_combo.findData(search_current)
         self.category_combo.setCurrentIndex(max(0, found))
+        self.search_category_combo.setCurrentIndex(max(0, search_found))
         self.category_combo.blockSignals(False)
+        self.search_category_combo.blockSignals(False)
 
     def _assign_category(self, index: int) -> None:
         document_id = self._current_document_id()

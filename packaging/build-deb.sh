@@ -24,6 +24,10 @@ if [[ -d "$stage" ]]; then
 fi
 mkdir -p "$stage/DEBIAN" "$stage/opt/wordvault" "$stage/usr/share/applications"
 cp -a dist/WordVault/. "$stage/opt/wordvault/"
+if [[ -f vendor/tika/tika-app.jar ]]; then
+  mkdir -p "$stage/opt/wordvault/resources"
+  cp vendor/tika/tika-app.jar "$stage/opt/wordvault/resources/tika-app.jar"
+fi
 cp packaging/wordvault.desktop "$stage/usr/share/applications/wordvault.desktop"
 
 cat > "$stage/DEBIAN/control" <<'CONTROL'
@@ -38,4 +42,3 @@ CONTROL
 
 dpkg-deb --build "$stage" "$project_root/dist/wordvault_0.1.0_arm64.deb"
 echo "已生成 dist/wordvault_0.1.0_arm64.deb"
-

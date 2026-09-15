@@ -22,13 +22,18 @@ stage="$project_root/build/deb-root"
 if [[ -d "$stage" ]]; then
   find "$stage" -mindepth 1 -delete
 fi
-mkdir -p "$stage/DEBIAN" "$stage/opt/wordvault" "$stage/usr/share/applications"
+mkdir -p \
+  "$stage/DEBIAN" \
+  "$stage/opt/wordvault" \
+  "$stage/usr/share/applications" \
+  "$stage/usr/share/icons/hicolor/scalable/apps"
 cp -a dist/WordVault/. "$stage/opt/wordvault/"
 if [[ -f vendor/tika/tika-app.jar ]]; then
   mkdir -p "$stage/opt/wordvault/resources"
   cp vendor/tika/tika-app.jar "$stage/opt/wordvault/resources/tika-app.jar"
 fi
 cp packaging/wordvault.desktop "$stage/usr/share/applications/wordvault.desktop"
+cp packaging/wordvault.svg "$stage/usr/share/icons/hicolor/scalable/apps/wordvault.svg"
 
 cat > "$stage/DEBIAN/control" <<'CONTROL'
 Package: wordvault

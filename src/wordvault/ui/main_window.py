@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QTextBrowser,
@@ -20,10 +24,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from wordvault.classification.service import ClassificationService
+from wordvault.content.change_monitor import ChangeMonitorService
 from wordvault.content.parsers import ParseError
-from wordvault.content.service import ContentService
+from wordvault.content.service import ContentService, quote_selection
 from wordvault.content.wps import WpsLauncher
+from wordvault.diagnostics.environment import EnvironmentInspector
+from wordvault.diagnostics.service import DiagnosticsService
+from wordvault.library.exporter import ExportConflictDecision, ExportService
 from wordvault.library.importer import DuplicateConflict, DuplicateDecision, ImportService
+from wordvault.library.lifecycle import LibraryLifecycleService
+from wordvault.search.indexing import IndexingJob, IndexingState
 from wordvault.search.service import SearchService
 from wordvault.storage.database import LibraryDatabase
 
@@ -34,7 +45,20 @@ class MainWindow(QMainWindow):
         self.database = database
         self.import_service = ImportService(database)
         self.content_service = ContentService(database)
+        self.change_monitor = ChangeMonitorService(database)
+        self.classification_service = ClassificationService(database)
+        self.export_service = ExportService(database)
+        self.lifecycle_service = LibraryLifecycleService(database)
+        self.diagnostics = DiagnosticsService(database.root / "logs")
+        self.environment_inspector = EnvironmentInspector()
+        self.diagnostics.record("APP_STARTED", app_version="0.1.0")
         self.search_service = SearchService(database)
+        self.indexing_job = IndexingJob(database)
+        self.index_timer = QTimer(self)
+        self.index_timer.timeout.connect(self._index_step)
+        self.change_timer = QTimer(self)
+        self.change_timer.timeout.connect(self._scan_external_changes)
+        self.change_timer.start(3000)
         self.wps_launcher = WpsLauncher()
         self.setWindowTitle("文澜资料库")
         self.setMinimumSize(960, 640)
@@ -57,11 +81,24 @@ class MainWindow(QMainWindow):
         brand.setAccessibleName("文澜资料库")
         sidebar_layout.addWidget(brand)
         sidebar_layout.addSpacing(42)
-        for label in ("全部文档", "未分类", "待复核", "回收站"):
+        navigation = (
+            ("全部文档", self._show_all_documents),
+            ("未分类", self._show_uncategorized),
+            ("待复核", self._show_needs_review),
+            ("回收站", self._show_trash),
+        )
+        for label, handler in navigation:
             button = QPushButton(label, objectName="navButton")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(handler)
             sidebar_layout.addWidget(button)
         sidebar_layout.addStretch()
+        export_diagnostics = QPushButton("导出诊断包", objectName="navButton")
+        export_diagnostics.clicked.connect(self._choose_diagnostics_destination)
+        clear_logs = QPushButton("清除日志", objectName="navButton")
+        clear_logs.clicked.connect(self._clear_diagnostics)
+        sidebar_layout.addWidget(export_diagnostics)
+        sidebar_layout.addWidget(clear_logs)
         location = QLabel("资料存储于本机", objectName="localOnly")
         location.setWordWrap(True)
         sidebar_layout.addWidget(location)
@@ -70,8 +107,8 @@ class MainWindow(QMainWindow):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(54, 42, 54, 42)
         header = QHBoxLayout()
-        title = QLabel("全部文档", objectName="pageTitle")
-        header.addWidget(title)
+        self.page_title = QLabel("全部文档", objectName="pageTitle")
+        header.addWidget(self.page_title)
         header.addStretch()
         self.search_input = QLineEdit(objectName="searchInput")
         self.search_input.setPlaceholderText("搜索文件名和正文…")
@@ -90,12 +127,38 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(self._open_current_in_wps)
         copy_button = QPushButton("复制正文", objectName="secondaryButton")
         copy_button.clicked.connect(self._copy_preview)
+        quote_button = QPushButton("复制并附来源", objectName="secondaryButton")
+        quote_button.clicked.connect(self._copy_with_source)
+        export_button = QPushButton("导出", objectName="secondaryButton")
+        export_button.clicked.connect(self._choose_export_directory)
+        trash_button = QPushButton("移入回收站", objectName="dangerButton")
+        trash_button.clicked.connect(lambda: self._move_current_to_trash())
+        restore_button = QPushButton("恢复", objectName="secondaryButton")
+        restore_button.clicked.connect(self._restore_current)
+        self.category_combo = QComboBox(objectName="categoryCombo")
+        self.category_combo.setMinimumWidth(150)
+        self.category_combo.activated.connect(self._assign_category)
+        category_button = QPushButton("新建分类", objectName="secondaryButton")
+        category_button.clicked.connect(self._create_category)
+        delete_category_button = QPushButton("删除分类", objectName="dangerButton")
+        delete_category_button.clicked.connect(self._delete_selected_category)
         actions.addWidget(import_button)
         actions.addWidget(folder_button)
         actions.addWidget(open_button)
         actions.addWidget(copy_button)
+        actions.addWidget(quote_button)
+        actions.addWidget(export_button)
+        actions.addWidget(trash_button)
+        actions.addWidget(restore_button)
         actions.addStretch()
         content_layout.addLayout(actions)
+        classification_actions = QHBoxLayout()
+        classification_actions.addWidget(QLabel("当前分类", objectName="fieldLabel"))
+        classification_actions.addWidget(self.category_combo)
+        classification_actions.addWidget(category_button)
+        classification_actions.addWidget(delete_category_button)
+        classification_actions.addStretch()
+        content_layout.addLayout(classification_actions)
         content_layout.addSpacing(18)
 
         self.empty_state = QLabel(
@@ -116,6 +179,23 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(splitter, stretch=1)
         content_layout.addWidget(self.empty_state)
 
+        index_footer = QHBoxLayout()
+        self.index_status = QLabel("索引就绪", objectName="fieldLabel")
+        self.index_progress = QProgressBar()
+        self.index_progress.setTextVisible(False)
+        self.index_progress.setMaximumWidth(180)
+        rebuild_button = QPushButton("重建索引", objectName="secondaryButton")
+        rebuild_button.clicked.connect(self._start_reindex)
+        self.pause_index_button = QPushButton("暂停", objectName="secondaryButton")
+        self.pause_index_button.clicked.connect(self._toggle_index_pause)
+        self.pause_index_button.setEnabled(False)
+        index_footer.addWidget(self.index_status)
+        index_footer.addWidget(self.index_progress)
+        index_footer.addWidget(rebuild_button)
+        index_footer.addWidget(self.pause_index_button)
+        index_footer.addStretch()
+        content_layout.addLayout(index_footer)
+
         layout.addWidget(sidebar)
         layout.addWidget(content, stretch=1)
         self.setCentralWidget(shell)
@@ -123,6 +203,9 @@ class MainWindow(QMainWindow):
     def _apply_theme(self) -> None:
         self.setStyleSheet(
             """
+            QMainWindow, QWidget {
+                font-family: "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+            }
             QMainWindow, QWidget#content { background: #F3F6F8; color: #172433; }
             QFrame#archiveSpine { background: #142B3D; border: none; }
             QLabel#brand { color: #F5FAF8; font-size: 25px; font-weight: 700; line-height: 1.2; }
@@ -134,12 +217,17 @@ class MainWindow(QMainWindow):
             QPushButton#navButton:hover { color: white; border-left-color: #39B48E; }
             QLabel#localOnly { color: #8299A7; font-size: 12px; }
             QLabel#pageTitle { color: #172433; font-size: 28px; font-weight: 700; }
+            QLabel#fieldLabel { color: #657580; font-size: 13px; }
             QLabel#emptyState { color: #61717C; font-size: 15px; line-height: 1.5; }
             QLineEdit#searchInput {
                 min-width: 310px; background: white; border: 1px solid #D5DEE3;
                 border-radius: 7px; padding: 10px 13px; font-size: 14px;
             }
             QLineEdit#searchInput:focus { border-color: #147D64; }
+            QComboBox#categoryCombo {
+                background: white; color: #294251; border: 1px solid #CBD6DC;
+                border-radius: 6px; padding: 9px 12px; font-size: 14px;
+            }
             QListWidget#documentList, QTextBrowser#preview {
                 background: white; border: 1px solid #D8E0E5; border-radius: 8px;
                 padding: 8px; font-size: 14px;
@@ -156,9 +244,14 @@ class MainWindow(QMainWindow):
                 border-radius: 6px; padding: 11px 16px; font-size: 14px;
             }
             QPushButton#secondaryButton:hover { border-color: #147D64; color: #147D64; }
+            QPushButton#dangerButton {
+                background: transparent; color: #9B3A3A; border: none; padding: 10px;
+            }
+            QPushButton#dangerButton:hover { color: #C22F2F; }
             QPushButton:focus { outline: 2px solid #67CDAE; }
             """
         )
+        self._refresh_categories()
 
     def import_paths(self, paths: list[Path]) -> None:
         failures = 0
@@ -237,15 +330,54 @@ class MainWindow(QMainWindow):
         self.preview.setVisible(has_documents)
         self.empty_state.setVisible(not has_documents)
 
+    def _load_by_where(self, title: str, where_clause: str, parameters: tuple = ()) -> None:
+        self.page_title.setText(title)
+        rows = self.database.connection.execute(
+            f"""
+            SELECT id, original_name, parse_status FROM documents
+            WHERE {where_clause} ORDER BY imported_at DESC
+            """,
+            parameters,
+        ).fetchall()
+        self._populate_documents(rows)
+
+    def _populate_documents(self, rows) -> None:
+        self.document_list.clear()
+        for document_id, original_name, parse_status in rows:
+            suffix = "  · 解析失败" if str(parse_status).startswith("error:") else ""
+            item = QListWidgetItem(f"{original_name}{suffix}")
+            item.setData(Qt.ItemDataRole.UserRole, document_id)
+            self.document_list.addItem(item)
+        has_documents = self.document_list.count() > 0
+        self.document_list.setVisible(has_documents)
+        self.preview.setVisible(has_documents)
+        self.empty_state.setVisible(not has_documents)
+
+    def _show_all_documents(self) -> None:
+        self.page_title.setText("全部文档")
+        self._load_documents()
+
+    def _show_uncategorized(self) -> None:
+        self._load_by_where("未分类", "status = 'active' AND category_id IS NULL")
+
+    def _show_needs_review(self) -> None:
+        self._load_by_where("待复核", "status = 'active' AND needs_review = 1")
+
+    def _show_trash(self) -> None:
+        self._load_by_where("回收站", "status = 'trash'")
+
     def _show_document(self, current: QListWidgetItem | None) -> None:
         if current is None:
             self.preview.clear()
             return
         row = self.database.connection.execute(
-            "SELECT content_text FROM documents WHERE id = ?",
+            "SELECT content_text, category_id FROM documents WHERE id = ?",
             (current.data(Qt.ItemDataRole.UserRole),),
         ).fetchone()
         self.preview.setPlainText((row[0] if row else None) or "此文档暂时没有可预览的正文。")
+        self.category_combo.blockSignals(True)
+        self.category_combo.setCurrentIndex(self.category_combo.findData(row[1] if row else None))
+        self.category_combo.blockSignals(False)
 
     def _search(self) -> None:
         query = self.search_input.text().strip()
@@ -296,6 +428,226 @@ class MainWindow(QMainWindow):
         selected = self.preview.textCursor().selectedText()
         text = selected or self.preview.toPlainText()
         if text:
-            from PySide6.QtWidgets import QApplication
-
             QApplication.clipboard().setText(text)
+
+    def _copy_with_source(self) -> None:
+        item = self.document_list.currentItem()
+        if item is None:
+            return
+        cursor = self.preview.textCursor()
+        selected = cursor.selectedText() or self.preview.toPlainText()
+        if not selected:
+            return
+        row = self.database.connection.execute(
+            "SELECT original_name FROM documents WHERE id = ?",
+            (item.data(Qt.ItemDataRole.UserRole),),
+        ).fetchone()
+        if row:
+            QApplication.clipboard().setText(
+                quote_selection(
+                    selected,
+                    row[0],
+                    paragraph_number=cursor.blockNumber() + 1,
+                    include_source=True,
+                )
+            )
+
+    def _current_document_id(self) -> str | None:
+        item = self.document_list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def _move_current_to_trash(self, *, confirm: bool = True) -> None:
+        document_id = self._current_document_id()
+        if document_id is None:
+            return
+        if confirm:
+            answer = QMessageBox.question(
+                self, "移入回收站", "确定将所选文档移入回收站吗？"
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.lifecycle_service.move_to_trash(document_id)
+        self._show_all_documents()
+
+    def _restore_current(self) -> None:
+        document_id = self._current_document_id()
+        if document_id is None:
+            return
+        row = self.database.connection.execute(
+            "SELECT status FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+        if row and row[0] == "trash":
+            self.lifecycle_service.restore(document_id)
+            self._show_trash()
+
+    def _refresh_categories(self) -> None:
+        current = self.category_combo.currentData() if self.category_combo.count() else None
+        self.category_combo.blockSignals(True)
+        self.category_combo.clear()
+        self.category_combo.addItem("未分类", None)
+        rows = self.database.connection.execute(
+            "SELECT id, name, parent_id FROM categories ORDER BY name"
+        ).fetchall()
+        by_parent: dict[str | None, list[tuple[str, str]]] = {}
+        for category_id, name, parent_id in rows:
+            by_parent.setdefault(parent_id, []).append((category_id, name))
+
+        def add_children(parent_id: str | None, depth: int) -> None:
+            for category_id, name in by_parent.get(parent_id, []):
+                self.category_combo.addItem(f"{'　' * depth}{name}", category_id)
+                add_children(category_id, depth + 1)
+
+        add_children(None, 0)
+        found = self.category_combo.findData(current)
+        self.category_combo.setCurrentIndex(max(0, found))
+        self.category_combo.blockSignals(False)
+
+    def _assign_category(self, index: int) -> None:
+        document_id = self._current_document_id()
+        if document_id is not None and index >= 0:
+            self.classification_service.assign(document_id, self.category_combo.itemData(index))
+
+    def _create_category(self) -> None:
+        name, accepted = QInputDialog.getText(self, "新建分类", "分类名称")
+        if not accepted or not name.strip():
+            return
+        keywords_text, keywords_accepted = QInputDialog.getText(
+            self, "分类关键词", "关键词（使用逗号分隔，可留空）"
+        )
+        if not keywords_accepted:
+            return
+        parent_id = self.category_combo.currentData()
+        keywords = tuple(
+            item.strip() for item in keywords_text.replace("，", ",").split(",") if item.strip()
+        )
+        try:
+            self.classification_service.create_category(
+                name, parent_id=parent_id, keywords=keywords
+            )
+            self._refresh_categories()
+        except ValueError as error:
+            QMessageBox.warning(self, "无法创建分类", str(error))
+
+    def _delete_selected_category(self) -> None:
+        category_id = self.category_combo.currentData()
+        if category_id is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "删除分类",
+            "删除分类后，其中的文档将转入“未分类”。确定继续吗？",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.classification_service.delete_category(
+                category_id, move_to_uncategorized=True
+            )
+            self._refresh_categories()
+            self._show_all_documents()
+        except ValueError as error:
+            QMessageBox.warning(self, "无法删除分类", str(error))
+
+    def _choose_export_directory(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "选择导出位置")
+        if selected:
+            exported = self._export_current_to(Path(selected))
+            if exported is not None:
+                QMessageBox.information(self, "导出完成", "文档已复制到所选目录。")
+
+    def _export_current_to(self, destination: Path) -> Path | None:
+        document_id = self._current_document_id()
+        if document_id is None:
+            return None
+        row = self.database.connection.execute(
+            "SELECT original_name FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        target = destination.resolve() / Path(row[0]).name
+        decision = ExportConflictDecision.SKIP
+        if target.exists():
+            message = QMessageBox(self)
+            message.setWindowTitle("导出位置已有同名文件")
+            overwrite = message.addButton("覆盖", QMessageBox.ButtonRole.DestructiveRole)
+            rename = message.addButton("自动重命名", QMessageBox.ButtonRole.AcceptRole)
+            message.addButton("跳过", QMessageBox.ButtonRole.RejectRole)
+            message.exec()
+            if message.clickedButton() is overwrite:
+                decision = ExportConflictDecision.OVERWRITE
+            elif message.clickedButton() is rename:
+                decision = ExportConflictDecision.AUTO_RENAME
+            else:
+                return None
+        return self.export_service.export_document(document_id, destination, decision=decision)
+
+    def _start_reindex(self) -> None:
+        progress = self.indexing_job.start()
+        self.index_progress.setRange(0, max(1, progress.total))
+        self.index_progress.setValue(0)
+        if progress.state is IndexingState.COMPLETED:
+            self.index_status.setText("没有需要索引的文档")
+            return
+        self.pause_index_button.setEnabled(True)
+        self.pause_index_button.setText("暂停")
+        self.index_timer.start(0)
+
+    def _index_step(self) -> None:
+        progress = self.indexing_job.step()
+        self.index_progress.setValue(progress.processed)
+        self.index_status.setText(
+            f"正在索引 {progress.processed}/{progress.total} · "
+            f"成功 {progress.successful} · 失败 {progress.failed}"
+        )
+        if progress.state is IndexingState.COMPLETED:
+            self.index_timer.stop()
+            self.pause_index_button.setEnabled(False)
+            self.index_status.setText(
+                f"索引完成 · 成功 {progress.successful} · 失败 {progress.failed}"
+            )
+            self._load_documents()
+
+    def _toggle_index_pause(self) -> None:
+        if self.indexing_job.state is IndexingState.RUNNING:
+            self.indexing_job.pause()
+            self.index_timer.stop()
+            self.pause_index_button.setText("继续")
+            self.index_status.setText("索引已暂停")
+        elif self.indexing_job.state is IndexingState.PAUSED:
+            self.indexing_job.resume()
+            self.index_timer.start(0)
+            self.pause_index_button.setText("暂停")
+
+    def _choose_diagnostics_destination(self) -> None:
+        selected, _ = QFileDialog.getSaveFileName(
+            self, "导出脱敏诊断包", "文澜诊断包.zip", "ZIP 压缩包 (*.zip)"
+        )
+        if selected:
+            destination = Path(selected)
+            if destination.suffix.lower() != ".zip":
+                destination = destination.with_suffix(".zip")
+            self._export_diagnostics_to(destination)
+            QMessageBox.information(
+                self,
+                "诊断包已导出",
+                "诊断包不包含正文、文件名、路径、搜索词或分类名称。",
+            )
+
+    def _export_diagnostics_to(self, destination: Path) -> Path:
+        environment = self.environment_inspector.inspect(self.database.root)
+        return self.diagnostics.export(destination, environment)
+
+    def _clear_diagnostics(self) -> None:
+        answer = QMessageBox.question(self, "清除日志", "确定清除全部本地诊断日志吗？")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.diagnostics.clear()
+
+    def _scan_external_changes(self) -> None:
+        if self.indexing_job.state in (IndexingState.RUNNING, IndexingState.PAUSED):
+            return
+        result = self.change_monitor.scan()
+        if result.changed:
+            self.index_status.setText(f"已更新 {result.changed} 份在 WPS 中修改的文档")
+            self._load_documents()
+        elif result.failed:
+            self.index_status.setText(f"有 {result.failed} 份文档需要检查")

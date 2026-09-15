@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from types import TracebackType
@@ -36,6 +37,7 @@ class LibraryDatabase:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("PRAGMA journal_mode = WAL")
             database = cls(resolved, connection)
+            database._backup_before_upgrade()
             database._initialize_schema()
             return database
         except sqlite3.DatabaseError as error:
@@ -116,6 +118,28 @@ class LibraryDatabase:
                 "UPDATE schema_info SET version = ? WHERE singleton = 1",
                 (self.CURRENT_SCHEMA_VERSION,),
             )
+
+    def _backup_before_upgrade(self) -> None:
+        has_schema = self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_info'"
+        ).fetchone()
+        if has_schema is None:
+            return
+        row = self.connection.execute(
+            "SELECT version FROM schema_info WHERE singleton = 1"
+        ).fetchone()
+        if row is None or int(row[0]) >= self.CURRENT_SCHEMA_VERSION:
+            return
+        old_version = int(row[0])
+        destination = self.root / f"{self.DATABASE_NAME}.pre-upgrade-v{old_version}"
+        temporary = self.root / f".{destination.name}.part"
+        temporary.unlink(missing_ok=True)
+        backup = sqlite3.connect(temporary)
+        try:
+            self.connection.backup(backup)
+        finally:
+            backup.close()
+        os.replace(temporary, destination)
 
     @property
     def schema_version(self) -> int:

@@ -64,7 +64,13 @@ class ClassificationService:
             if cursor.rowcount == 0:
                 raise ValueError("文档不存在")
 
-    def delete_category(self, category_id: str, *, migrate_to: str | None = None) -> None:
+    def delete_category(
+        self,
+        category_id: str,
+        *,
+        migrate_to: str | None = None,
+        move_to_uncategorized: bool = False,
+    ) -> None:
         child = self.database.connection.execute(
             "SELECT 1 FROM categories WHERE parent_id = ? LIMIT 1", (category_id,)
         ).fetchone()
@@ -73,7 +79,7 @@ class ClassificationService:
         count = self.database.connection.execute(
             "SELECT count(*) FROM documents WHERE category_id = ?", (category_id,)
         ).fetchone()[0]
-        if count and migrate_to is None:
+        if count and migrate_to is None and not move_to_uncategorized:
             raise ValueError("分类仍包含文档，请选择目标分类或未分类")
         if migrate_to == category_id:
             raise ValueError("目标分类不能是原分类")

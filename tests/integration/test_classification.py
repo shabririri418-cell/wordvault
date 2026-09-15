@@ -39,6 +39,23 @@ def test_nonempty_category_requires_document_migration(tmp_path: Path) -> None:
     assert assigned == target_category
 
 
+def test_nonempty_category_can_move_documents_to_uncategorized(tmp_path: Path) -> None:
+    source = tmp_path / "报告.docx"
+    source.write_bytes(b"content")
+    with LibraryDatabase.open(tmp_path / "资料库") as database:
+        document = ImportService(database).import_file(source)
+        service = ClassificationService(database)
+        category = service.create_category("临时分类")
+        service.assign(document.document_id, category)
+
+        service.delete_category(category, move_to_uncategorized=True)
+        assigned = database.connection.execute(
+            "SELECT category_id FROM documents WHERE id = ?", (document.document_id,)
+        ).fetchone()[0]
+
+    assert assigned is None
+
+
 def test_recommends_from_keywords_and_marks_auto_assignment_for_review(tmp_path: Path) -> None:
     source = tmp_path / "终端制度.docx"
     source.write_bytes(b"placeholder")
@@ -63,4 +80,3 @@ def test_recommends_from_keywords_and_marks_auto_assignment_for_review(tmp_path:
     assert recommendation.confidence == "high"
     assert "终端" in recommendation.reasons
     assert tuple(row) == (category, 1)
-

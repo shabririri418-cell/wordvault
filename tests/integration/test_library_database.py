@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -44,3 +45,31 @@ def test_reports_a_corrupt_database_without_replacing_it(tmp_path: Path) -> None
         LibraryDatabase.open(root)
 
     assert database_path.read_bytes() == b"not-a-database"
+
+
+def test_upgrade_creates_a_database_backup_before_migration(tmp_path: Path) -> None:
+    root = tmp_path / "资料库"
+    root.mkdir()
+    database_path = root / "wordvault.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute("CREATE TABLE schema_info(singleton INTEGER PRIMARY KEY, version INTEGER)")
+    connection.execute("INSERT INTO schema_info VALUES (1, 2)")
+    connection.execute(
+        """
+        CREATE TABLE documents(
+            id TEXT PRIMARY KEY, original_name TEXT, stored_name TEXT, source_relative_path TEXT,
+            sha256 TEXT, size_bytes INTEGER, modified_ns INTEGER, status TEXT,
+            imported_at TEXT, deleted_at TEXT, parse_status TEXT, content_text TEXT
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    with LibraryDatabase.open(root) as upgraded:
+        assert upgraded.schema_version == LibraryDatabase.CURRENT_SCHEMA_VERSION
+
+    backup = sqlite3.connect(root / "wordvault.sqlite3.pre-upgrade-v2")
+    backup_version = backup.execute("SELECT version FROM schema_info").fetchone()[0]
+    backup.close()
+    assert backup_version == 2

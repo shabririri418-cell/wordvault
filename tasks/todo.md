@@ -27,14 +27,14 @@
 ## Phase 2: document-library
 
 - [x] Task 5: 导入文件与文件夹、UUID存储及重复决策
-- [ ] Task 6: 文档列表、导出与调用WPS
-- [ ] Task 7: 内部回收站和外部变更一致性检查
+- [x] Task 6: 文档列表、导出与调用WPS
+- [x] Task 7: 内部回收站和外部变更一致性检查
 
 ## Phase 3: document-content
 
 - [x] Task 8: `.docx`正文提取和解析失败隔离
 - [ ] Task 9: `.doc`适配器与WPS/本地工具回退
-- [ ] Task 10: 阅读预览、复制和来源引用
+- [x] Task 10: 阅读预览、复制和来源引用
 
 ## Phase 4: classification
 
@@ -44,7 +44,7 @@
 ## Phase 5: full-text-search
 
 - [x] Task 13: 文件名与正文索引、筛选和高亮
-- [ ] Task 14: 索引进度、暂停继续及重建
+- [x] Task 14: 索引进度、暂停继续及重建
 
 ## Phase 6: offline-delivery
 

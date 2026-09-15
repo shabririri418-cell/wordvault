@@ -6,6 +6,38 @@ import pytest
 from wordvault.storage.database import LibraryDatabase, LibraryInitializationError
 
 
+def test_failed_schema_upgrade_restores_original_database(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    database_path = root / LibraryDatabase.DATABASE_NAME
+    connection = sqlite3.connect(database_path)
+    connection.execute("CREATE TABLE schema_info(singleton INTEGER PRIMARY KEY, version INTEGER)")
+    connection.execute("INSERT INTO schema_info VALUES (1, 2)")
+    connection.commit()
+    connection.close()
+
+    def fail_upgrade(database: LibraryDatabase) -> None:
+        database.connection.execute("CREATE TABLE leaked(value TEXT)")
+        database.connection.commit()
+        raise sqlite3.DatabaseError("simulated migration failure")
+
+    monkeypatch.setattr(LibraryDatabase, "_initialize_schema", fail_upgrade)
+
+    with pytest.raises(LibraryInitializationError):
+        LibraryDatabase.open(root)
+
+    restored = sqlite3.connect(database_path)
+    version = restored.execute("SELECT version FROM schema_info").fetchone()[0]
+    leaked = restored.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='leaked'"
+    ).fetchone()
+    restored.close()
+    assert version == 2
+    assert leaked is None
+
+
 def test_initializes_and_reopens_a_library(tmp_path: Path) -> None:
     root = tmp_path / "资料库"
 

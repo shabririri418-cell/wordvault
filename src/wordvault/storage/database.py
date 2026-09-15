@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 from types import TracebackType
@@ -32,17 +33,20 @@ class LibraryDatabase:
             raise LibraryInitializationError("无法创建资料库目录，请检查权限和磁盘空间") from error
 
         database_path = resolved / cls.DATABASE_NAME
+        backup_path: Path | None = None
         try:
             connection = sqlite3.connect(database_path)
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("PRAGMA journal_mode = WAL")
             database = cls(resolved, connection)
-            database._backup_before_upgrade()
+            backup_path = database._backup_before_upgrade()
             database._initialize_schema()
             return database
         except sqlite3.DatabaseError as error:
             if "connection" in locals():
                 connection.close()
+            if backup_path is not None:
+                cls._restore_failed_upgrade(database_path, backup_path)
             raise LibraryInitializationError("资料库数据库无法打开，原文件未被替换") from error
 
     def _initialize_schema(self) -> None:
@@ -119,17 +123,17 @@ class LibraryDatabase:
                 (self.CURRENT_SCHEMA_VERSION,),
             )
 
-    def _backup_before_upgrade(self) -> None:
+    def _backup_before_upgrade(self) -> Path | None:
         has_schema = self.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_info'"
         ).fetchone()
         if has_schema is None:
-            return
+            return None
         row = self.connection.execute(
             "SELECT version FROM schema_info WHERE singleton = 1"
         ).fetchone()
         if row is None or int(row[0]) >= self.CURRENT_SCHEMA_VERSION:
-            return
+            return None
         old_version = int(row[0])
         destination = self.root / f"{self.DATABASE_NAME}.pre-upgrade-v{old_version}"
         temporary = self.root / f".{destination.name}.part"
@@ -140,6 +144,16 @@ class LibraryDatabase:
         finally:
             backup.close()
         os.replace(temporary, destination)
+        return destination
+
+    @staticmethod
+    def _restore_failed_upgrade(database_path: Path, backup_path: Path) -> None:
+        for suffix in ("-wal", "-shm"):
+            Path(f"{database_path}{suffix}").unlink(missing_ok=True)
+        temporary = database_path.with_name(f".{database_path.name}.restore")
+        temporary.unlink(missing_ok=True)
+        shutil.copy2(backup_path, temporary)
+        os.replace(temporary, database_path)
 
     @property
     def schema_version(self) -> int:

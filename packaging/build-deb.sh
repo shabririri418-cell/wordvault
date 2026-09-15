@@ -51,6 +51,7 @@ Section: office
 Priority: optional
 Architecture: arm64
 Maintainer: WordVault Team
+Depends: libdbus-1-3, libegl1, libfontconfig1, libgl1, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxext6, libxi6, libxkbcommon0, libxkbcommon-x11-0, libxrender1
 Description: 完全离线的 Word 文档管理工具
 CONTROL
 

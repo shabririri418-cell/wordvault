@@ -21,15 +21,16 @@ if ($BuilderPlatforms -notmatch "linux/arm64") {
     if ($LASTEXITCODE -ne 0) {
         throw "无法注册 ARM64 模拟支持。请检查 Docker Hub 网络连接后重试。"
     }
-    $BuilderPlatforms = docker buildx inspect --bootstrap 2>&1 | Out-String
-    if ($BuilderPlatforms -notmatch "linux/arm64") {
-        throw "Docker 构建器仍未报告 linux/arm64 支持，请重启 Docker Desktop 后重试。"
+    $EmulatedArchitecture = docker run --rm --platform linux/arm64 alpine uname -m
+    if ($LASTEXITCODE -ne 0 -or $EmulatedArchitecture.Trim() -ne "aarch64") {
+        throw "ARM64 模拟器注册后未能通过运行验证，请重启 Docker Desktop 后重试。"
     }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
 docker buildx build `
     --platform linux/arm64 `
+    --pull=false `
     --file (Join-Path $ProjectRoot "packaging/Dockerfile.arm64") `
     --output "type=local,dest=$OutputPath" `
     $ProjectRoot

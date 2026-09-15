@@ -48,7 +48,7 @@
 
 ## Phase 6: offline-delivery
 
-- [ ] Task 15: 离线依赖缓存与AArch64 `.deb` 打包
+- [x] Task 15: 离线依赖缓存与AArch64 `.deb` 打包
 - [ ] Task 16: 升级迁移回滚、验收资料和模拟文档集
 
 ## Checkpoint: Complete

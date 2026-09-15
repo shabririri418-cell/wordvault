@@ -792,7 +792,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "诊断包已导出",
-                "诊断包不包含正文、文件名、路径、搜索词或分类名称。",
+                "诊断包已包含运行环境、自检结果、脱敏事件和匿名文档结构。\n\n"
+                "不包含正文、文件名、路径、搜索词、分类名称或文档哈希。",
             )
 
     def _export_diagnostics_to(self, destination: Path) -> Path:

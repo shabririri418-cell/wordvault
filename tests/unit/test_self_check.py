@@ -15,7 +15,11 @@ def test_self_check_exports_only_summary_and_synthetic_results(tmp_path: Path) -
     assert result.overall_status == "pass"
     assert destination.is_file()
     with zipfile.ZipFile(destination) as package:
-        assert set(package.namelist()) == {"environment.json", "self-check.json"}
+        assert set(package.namelist()) == {
+            "collection-structure.json",
+            "environment.json",
+            "self-check.json",
+        }
         report = json.loads(package.read("self-check.json"))
         environment = json.loads(package.read("environment.json"))
     assert report["checks"]["database"] == "pass"

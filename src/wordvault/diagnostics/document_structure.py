@@ -15,6 +15,8 @@ class DocumentStructureInspector:
 
     def inspect_root(self, library_root: Path) -> dict[str, object]:
         database_path = library_root / LibraryDatabase.DATABASE_NAME
+        if not database_path.is_file():
+            return self._empty_report()
         connection = sqlite3.connect(f"file:{database_path.as_posix()}?mode=ro", uri=True)
         try:
             return self._inspect(connection, library_root)
@@ -51,6 +53,10 @@ class DocumentStructureInspector:
             "document_count": len(documents),
             "documents": documents,
         }
+
+    @staticmethod
+    def _empty_report() -> dict[str, object]:
+        return {"schema_version": 1, "document_count": 0, "documents": []}
 
     def _inspect_docx(self, path: Path) -> dict[str, object]:
         try:

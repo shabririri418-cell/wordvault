@@ -33,6 +33,7 @@ from wordvault.content.parsers import ParseError
 from wordvault.content.service import ContentService, quote_selection
 from wordvault.content.wps import WpsLauncher
 from wordvault.diagnostics.environment import EnvironmentInspector
+from wordvault.diagnostics.self_check import SelfCheckService
 from wordvault.diagnostics.service import DiagnosticsService
 from wordvault.library.exporter import ExportConflictDecision, ExportService
 from wordvault.library.importer import DuplicateConflict, DuplicateDecision, ImportService
@@ -794,8 +795,11 @@ class MainWindow(QMainWindow):
             )
 
     def _export_diagnostics_to(self, destination: Path) -> Path:
-        environment = self.environment_inspector.inspect(self.database.root)
-        return self.diagnostics.export(destination, environment)
+        result = SelfCheckService(
+            inspector=self.environment_inspector,
+            event_log_directory=self.database.root / "logs",
+        ).run(self.database.root, destination)
+        return result.destination
 
     def _clear_diagnostics(self) -> None:
         answer = QMessageBox.question(self, "清除日志", "确定清除全部本地诊断日志吗？")

@@ -1,3 +1,4 @@
+import json
 import zipfile
 from pathlib import Path
 
@@ -76,8 +77,14 @@ def test_main_window_exports_sanitized_diagnostics(qtbot, tmp_path: Path) -> Non
     archive = window._export_diagnostics_to(tmp_path / "diagnostics.zip")
 
     with zipfile.ZipFile(archive) as package:
-        assert set(package.namelist()) == {"environment.json", "events.jsonl"}
+        assert set(package.namelist()) == {
+            "environment.json",
+            "events.jsonl",
+            "self-check.json",
+        }
         assert "APP_STARTED" in package.read("events.jsonl").decode("utf-8")
+        report = json.loads(package.read("self-check.json"))
+        assert report["overall_status"] == "pass"
     database.close()
 
 

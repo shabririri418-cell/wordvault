@@ -64,6 +64,28 @@ class ClassificationService:
             if cursor.rowcount == 0:
                 raise ValueError("文档不存在")
 
+    def update_category(
+        self,
+        category_id: str,
+        *,
+        name: str,
+        description: str = "",
+        keywords: tuple[str, ...] = (),
+    ) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError("分类名称不能为空")
+        with self.database.connection:
+            cursor = self.database.connection.execute(
+                """
+                UPDATE categories SET name = ?, description = ?, keywords_json = ?
+                WHERE id = ?
+                """,
+                (name, description.strip(), json.dumps(keywords), category_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("分类不存在")
+
     def delete_category(
         self,
         category_id: str,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -140,8 +141,12 @@ class MainWindow(QMainWindow):
         self.category_combo.activated.connect(self._assign_category)
         category_button = QPushButton("新建分类", objectName="secondaryButton")
         category_button.clicked.connect(self._create_category)
+        edit_category_button = QPushButton("编辑分类", objectName="secondaryButton")
+        edit_category_button.clicked.connect(self._edit_selected_category)
         delete_category_button = QPushButton("删除分类", objectName="dangerButton")
         delete_category_button.clicked.connect(self._delete_selected_category)
+        recommend_button = QPushButton("推荐分类", objectName="primaryButton")
+        recommend_button.clicked.connect(self._recommend_category)
         actions.addWidget(import_button)
         actions.addWidget(folder_button)
         actions.addWidget(open_button)
@@ -156,7 +161,9 @@ class MainWindow(QMainWindow):
         classification_actions.addWidget(QLabel("当前分类", objectName="fieldLabel"))
         classification_actions.addWidget(self.category_combo)
         classification_actions.addWidget(category_button)
+        classification_actions.addWidget(edit_category_button)
         classification_actions.addWidget(delete_category_button)
+        classification_actions.addWidget(recommend_button)
         classification_actions.addStretch()
         content_layout.addLayout(classification_actions)
         content_layout.addSpacing(18)
@@ -547,6 +554,66 @@ class MainWindow(QMainWindow):
             self._show_all_documents()
         except ValueError as error:
             QMessageBox.warning(self, "无法删除分类", str(error))
+
+    def _edit_selected_category(self) -> None:
+        category_id = self.category_combo.currentData()
+        if category_id is None:
+            return
+        row = self.database.connection.execute(
+            "SELECT name, description, keywords_json FROM categories WHERE id = ?",
+            (category_id,),
+        ).fetchone()
+        if row is None:
+            return
+        name, accepted = QInputDialog.getText(
+            self, "编辑分类", "分类名称", text=row[0]
+        )
+        if not accepted:
+            return
+        current_keywords = "，".join(json.loads(row[2]))
+        keywords_text, keywords_accepted = QInputDialog.getText(
+            self, "编辑分类关键词", "关键词（使用逗号分隔）", text=current_keywords
+        )
+        if not keywords_accepted:
+            return
+        keywords = tuple(
+            item.strip() for item in keywords_text.replace("，", ",").split(",") if item.strip()
+        )
+        try:
+            self.classification_service.update_category(
+                category_id, name=name, description=row[1], keywords=keywords
+            )
+            self._refresh_categories()
+        except ValueError as error:
+            QMessageBox.warning(self, "无法修改分类", str(error))
+
+    def _recommend_category(self) -> None:
+        document_id = self._current_document_id()
+        if document_id is None:
+            return
+        recommendation = self.classification_service.recommend(document_id)
+        if recommendation is None:
+            QMessageBox.information(
+                self,
+                "暂无分类建议",
+                "请先为分类设置关键词，或积累更多人工分类样本。",
+            )
+            return
+        index = self.category_combo.findData(recommendation.category_id)
+        category_name = self.category_combo.itemText(index).strip()
+        confidence_names = {"high": "高", "medium": "中", "low": "低"}
+        reasons = "、".join(recommendation.reasons) or "已分类样本"
+        answer = QMessageBox.question(
+            self,
+            "分类建议",
+            f"建议分类：{category_name}\n可信度：{confidence_names[recommendation.confidence]}"
+            f"\n依据：{reasons}\n\n是否采用？",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.classification_service.accept_recommendation(
+                document_id, recommendation, automatic=False
+            )
+            self.category_combo.setCurrentIndex(index)
 
     def _choose_export_directory(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "选择导出位置")

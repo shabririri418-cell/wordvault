@@ -80,3 +80,28 @@ def test_recommends_from_keywords_and_marks_auto_assignment_for_review(tmp_path:
     assert recommendation.confidence == "high"
     assert "终端" in recommendation.reasons
     assert tuple(row) == (category, 1)
+
+
+def test_updates_category_name_and_keywords(tmp_path: Path) -> None:
+    source = tmp_path / "采购办法.docx"
+    source.write_bytes(b"content")
+    with LibraryDatabase.open(tmp_path / "资料库") as database:
+        document = ImportService(database).import_file(source)
+        database.connection.execute(
+            "UPDATE documents SET content_text = ? WHERE id = ?",
+            ("设备采购审批流程", document.document_id),
+        )
+        database.connection.commit()
+        service = ClassificationService(database)
+        category = service.create_category("旧名称", keywords=("无关词",))
+
+        service.update_category(category, name="采购制度", keywords=("设备", "采购", "审批"))
+        recommendation = service.recommend(document.document_id)
+        stored_name = database.connection.execute(
+            "SELECT name FROM categories WHERE id = ?", (category,)
+        ).fetchone()[0]
+
+    assert stored_name == "采购制度"
+    assert recommendation is not None
+    assert recommendation.category_id == category
+    assert recommendation.confidence == "high"

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=双击安装文澜资料库
+Comment=完全离线安装，无需输入命令
+Exec=bash -c 'd="$(dirname "$1")"; exec bash "$d/install-gui.sh"' -- %k
+Icon=system-software-install
+Terminal=false
+Categories=Utility;
+

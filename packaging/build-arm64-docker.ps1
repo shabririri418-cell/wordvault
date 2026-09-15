@@ -49,3 +49,4 @@ Set-Content -Encoding ascii `
     -Value "$PackageHash  wordvault_0.1.0_arm64.deb"
 
 Write-Host "ARM64 安装包已输出到 $OutputPath"
+Write-Host "客户交付请使用：文澜资料库-银河麒麟ARM64-双击安装.tar.gz"

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,6 +36,7 @@ from wordvault.diagnostics.service import DiagnosticsService
 from wordvault.library.exporter import ExportConflictDecision, ExportService
 from wordvault.library.importer import DuplicateConflict, DuplicateDecision, ImportService
 from wordvault.library.lifecycle import LibraryLifecycleService
+from wordvault.library.migration import LibraryMigrationService
 from wordvault.search.indexing import IndexingJob, IndexingState
 from wordvault.search.service import SearchService
 from wordvault.storage.database import LibraryDatabase
@@ -50,6 +52,7 @@ class MainWindow(QMainWindow):
         self.classification_service = ClassificationService(database)
         self.export_service = ExportService(database)
         self.lifecycle_service = LibraryLifecycleService(database)
+        self.migration_service = LibraryMigrationService(database)
         self.diagnostics = DiagnosticsService(database.root / "logs")
         self.environment_inspector = EnvironmentInspector()
         self.diagnostics.record("APP_STARTED", app_version="0.1.0")
@@ -98,6 +101,9 @@ class MainWindow(QMainWindow):
         export_diagnostics.clicked.connect(self._choose_diagnostics_destination)
         clear_logs = QPushButton("清除日志", objectName="navButton")
         clear_logs.clicked.connect(self._clear_diagnostics)
+        migrate_library = QPushButton("迁移资料库", objectName="navButton")
+        migrate_library.clicked.connect(self._choose_library_migration)
+        sidebar_layout.addWidget(migrate_library)
         sidebar_layout.addWidget(export_diagnostics)
         sidebar_layout.addWidget(clear_logs)
         location = QLabel("资料存储于本机", objectName="localOnly")
@@ -263,28 +269,41 @@ class MainWindow(QMainWindow):
     def import_paths(self, paths: list[Path]) -> None:
         failures = 0
         for path in paths:
+            started = time.monotonic()
             try:
                 record = self.import_service.import_file(path)
-                try:
-                    self.content_service.parse_document(record.document_id)
-                    self.search_service.index_document(record.document_id)
-                except ParseError:
-                    failures += 1
+                failures += self._parse_and_index(record.document_id, path.suffix, started)
             except DuplicateConflict as conflict:
                 record = self._resolve_duplicate(path, conflict)
                 if record is None:
+                    self.diagnostics.record("IMPORT_CANCELLED", format=path.suffix.lower())
                     failures += 1
                     continue
-                try:
-                    self.content_service.parse_document(record.document_id)
-                    self.search_service.index_document(record.document_id)
-                except ParseError:
-                    failures += 1
+                failures += self._parse_and_index(record.document_id, path.suffix, started)
             except (OSError, ValueError):
+                self.diagnostics.record("IMPORT_FAILED", error_code="IMPORT_IO_OR_INPUT")
                 failures += 1
         self._load_documents()
         if failures:
             QMessageBox.warning(self, "部分文档未完成", f"有 {failures} 份文档需要处理或检查。")
+
+    def _parse_and_index(self, document_id: str, suffix: str, started: float) -> int:
+        try:
+            self.content_service.parse_document(document_id)
+            self.search_service.index_document(document_id)
+            duration = round((time.monotonic() - started) * 1000)
+            self.diagnostics.record(
+                "IMPORT_COMPLETED",
+                format=suffix.lower(),
+                duration_ms=duration,
+                status="ready",
+            )
+            return 0
+        except ParseError as error:
+            self.diagnostics.record(
+                "DOC_PARSE_FAILED", format=suffix.lower(), error_code=error.code
+            )
+            return 1
 
     def _choose_files(self) -> None:
         selected, _ = QFileDialog.getOpenFileNames(
@@ -718,3 +737,21 @@ class MainWindow(QMainWindow):
             self._load_documents()
         elif result.failed:
             self.index_status.setText(f"有 {result.failed} 份文档需要检查")
+
+    def _choose_library_migration(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "选择新的资料库上级目录")
+        if not selected:
+            return
+        destination = Path(selected).resolve() / "文澜资料库"
+        try:
+            migrated = self.migration_service.migrate(destination)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "资料库迁移失败", str(error))
+            return
+        QSettings().setValue("library_root", str(migrated))
+        QMessageBox.information(
+            self,
+            "资料库迁移完成",
+            "全部内容校验成功。程序将关闭，下次启动使用新资料库；旧资料库仍然保留。",
+        )
+        QApplication.quit()

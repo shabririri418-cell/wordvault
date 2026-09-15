@@ -17,7 +17,7 @@ def test_acceptance_samples_cover_import_parse_and_body_search(tmp_path: Path) -
 
     with LibraryDatabase.open(tmp_path / "library") as database:
         imported = ImportService(database).import_folder(samples)
-        assert len(imported) == 4
+        assert len(imported) == 64
         content = ContentService(database)
         search = SearchService(database)
         for record in imported:

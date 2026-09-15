@@ -8,9 +8,16 @@ from pathlib import Path
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wordvault")
     parser.add_argument("--self-check", action="store_true", help="运行离线环境自检")
+    parser.add_argument("--gui-smoke-test", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--library-root", type=Path, help="要检测读写能力的资料库目录")
     parser.add_argument("--output", type=Path, help="诊断包输出位置")
     arguments = parser.parse_args(argv)
+    if arguments.gui_smoke_test:
+        from PySide6.QtCore import qVersion
+        from PySide6.QtWidgets import QApplication
+
+        application = QApplication.instance() or QApplication([])
+        return 0 if application and qVersion() else 1
     if arguments.self_check:
         from wordvault.diagnostics.self_check import SelfCheckService
 

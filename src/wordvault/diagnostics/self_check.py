@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wordvault.content.parsers import DocxParser
+from wordvault.diagnostics.document_structure import DocumentStructureInspector
 from wordvault.diagnostics.environment import EnvironmentInspector
 from wordvault.storage.database import LibraryDatabase
 
@@ -55,6 +56,10 @@ class SelfCheckService:
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as package:
             package.writestr("environment.json", self._json(environment))
             package.writestr("self-check.json", self._json(report))
+            package.writestr(
+                "collection-structure.json",
+                self._json(DocumentStructureInspector().inspect_root(library_root)),
+            )
             if self.event_log_directory is not None:
                 lines = []
                 for log_path in sorted(self.event_log_directory.glob("events-*.jsonl")):

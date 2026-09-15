@@ -78,6 +78,7 @@ def test_main_window_exports_sanitized_diagnostics(qtbot, tmp_path: Path) -> Non
 
     with zipfile.ZipFile(archive) as package:
         assert set(package.namelist()) == {
+            "collection-structure.json",
             "environment.json",
             "events.jsonl",
             "self-check.json",

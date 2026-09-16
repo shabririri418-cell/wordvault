@@ -110,11 +110,11 @@ class MainWindow(QMainWindow):
         category_header = QHBoxLayout()
         category_header.addWidget(QLabel("我的分类", objectName="sectionLabel"))
         category_header.addStretch()
-        add_category = QPushButton("＋", objectName="addCategoryButton")
-        add_category.setToolTip("新建分类")
-        add_category.setAccessibleName("新建分类")
-        add_category.clicked.connect(self._create_category)
-        category_header.addWidget(add_category)
+        self.add_category_button = QPushButton("＋", objectName="addCategoryButton")
+        self.add_category_button.setToolTip("新建一级分类")
+        self.add_category_button.setAccessibleName("新建一级分类")
+        self.add_category_button.clicked.connect(self._create_top_level_category)
+        category_header.addWidget(self.add_category_button)
         sidebar_layout.addSpacing(16)
         sidebar_layout.addLayout(category_header)
         self.category_tree = QTreeWidget(objectName="categoryTree")
@@ -393,7 +393,7 @@ class MainWindow(QMainWindow):
         if item is not None:
             self.category_tree.setCurrentItem(item)
         menu = QMenu(self)
-        menu.addAction("新建子分类", self._create_category)
+        menu.addAction("新建子分类", self._create_child_category)
         if item is not None:
             menu.addAction("重命名与关键词", self._edit_selected_category)
             menu.addAction("导出该分类", self._choose_category_export)
@@ -713,8 +713,18 @@ class MainWindow(QMainWindow):
         if document_id is not None and index >= 0:
             self.classification_service.assign(document_id, self.category_combo.itemData(index))
 
-    def _create_category(self) -> None:
-        name, accepted = QInputDialog.getText(self, "新建分类", "分类名称")
+    def _create_top_level_category(self) -> None:
+        self._create_category(parent_id=None)
+
+    def _create_child_category(self) -> None:
+        current = self.category_tree.currentItem()
+        if current is None:
+            return
+        self._create_category(parent_id=current.data(0, Qt.ItemDataRole.UserRole))
+
+    def _create_category(self, *, parent_id: str | None) -> None:
+        title = "新建一级分类" if parent_id is None else "新建子分类"
+        name, accepted = QInputDialog.getText(self, title, "分类名称")
         if not accepted or not name.strip():
             return
         keywords_text, keywords_accepted = QInputDialog.getText(
@@ -722,7 +732,6 @@ class MainWindow(QMainWindow):
         )
         if not keywords_accepted:
             return
-        parent_id = self.category_combo.currentData()
         keywords = tuple(
             item.strip() for item in keywords_text.replace("，", ",").split(",") if item.strip()
         )

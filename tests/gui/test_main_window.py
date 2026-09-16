@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QInputDialog
 
 from wordvault.classification.service import ClassificationService
 from wordvault.storage.database import LibraryDatabase
@@ -173,4 +173,44 @@ def test_advanced_search_filters_are_hidden_until_requested(qtbot, tmp_path: Pat
     assert window.filter_panel.isHidden()
     qtbot.mouseClick(window.filter_button, Qt.MouseButton.LeftButton)
     assert not window.filter_panel.isHidden()
+    database.close()
+
+
+def test_plus_button_always_creates_a_top_level_category(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    database = LibraryDatabase.open(tmp_path / "资料库")
+    ClassificationService(database).create_category("财务")
+    window = MainWindow(database)
+    qtbot.addWidget(window)
+    window.category_tree.setCurrentItem(window.category_tree.topLevelItem(0))
+    answers = iter((("新大类", True), ("", True)))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: next(answers))
+
+    qtbot.mouseClick(window.add_category_button, Qt.MouseButton.LeftButton)
+
+    parent_id = database.connection.execute(
+        "SELECT parent_id FROM categories WHERE name = '新大类'"
+    ).fetchone()[0]
+    assert parent_id is None
+    database.close()
+
+
+def test_context_action_creates_a_child_of_the_selected_category(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    database = LibraryDatabase.open(tmp_path / "资料库")
+    parent = ClassificationService(database).create_category("财务")
+    window = MainWindow(database)
+    qtbot.addWidget(window)
+    window.category_tree.setCurrentItem(window.category_tree.topLevelItem(0))
+    answers = iter((("报销", True), ("", True)))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: next(answers))
+
+    window._create_child_category()
+
+    parent_id = database.connection.execute(
+        "SELECT parent_id FROM categories WHERE name = '报销'"
+    ).fetchone()[0]
+    assert parent_id == parent
     database.close()

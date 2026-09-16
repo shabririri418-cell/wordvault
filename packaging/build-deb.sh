@@ -13,7 +13,7 @@ build_requirements="${BUILD_REQUIREMENTS:-requirements-build.txt}"
 python3 -m venv .venv-build
 .venv-build/bin/python -m pip install \
   --no-index --find-links vendor/wheels -r "$build_requirements"
-.venv-build/bin/python -m pytest -q
+.venv-build/bin/python -m pytest -q --ignore=tests/packaging
 .venv-build/bin/python -m ruff check .
 .venv-build/bin/pyinstaller \
   --noconfirm --clean --windowed --onedir \

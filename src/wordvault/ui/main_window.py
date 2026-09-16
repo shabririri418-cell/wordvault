@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -19,11 +20,14 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QSplitter,
     QTextBrowser,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -81,13 +85,16 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         sidebar = QFrame(objectName="archiveSpine")
-        sidebar.setFixedWidth(232)
+        sidebar.setFixedWidth(248)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(24, 30, 24, 24)
-        brand = QLabel("文澜\n资料库", objectName="brand")
+        sidebar_layout.setContentsMargins(18, 24, 18, 18)
+        sidebar_layout.setSpacing(6)
+        brand = QLabel("文澜资料库", objectName="brand")
         brand.setAccessibleName("文澜资料库")
         sidebar_layout.addWidget(brand)
-        sidebar_layout.addSpacing(42)
+        local_badge = QLabel("● 资料只保存在本机", objectName="localOnly")
+        sidebar_layout.addWidget(local_badge)
+        sidebar_layout.addSpacing(22)
         navigation = (
             ("全部文档", self._show_all_documents),
             ("未分类", self._show_uncategorized),
@@ -99,26 +106,40 @@ class MainWindow(QMainWindow):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(handler)
             sidebar_layout.addWidget(button)
-        sidebar_layout.addStretch()
-        export_diagnostics = QPushButton("导出诊断包", objectName="navButton")
-        export_diagnostics.clicked.connect(self._choose_diagnostics_destination)
-        clear_logs = QPushButton("清除日志", objectName="navButton")
-        clear_logs.clicked.connect(self._clear_diagnostics)
-        empty_trash = QPushButton("清空回收站", objectName="navButton")
-        empty_trash.clicked.connect(self._empty_trash)
-        migrate_library = QPushButton("迁移资料库", objectName="navButton")
-        migrate_library.clicked.connect(self._choose_library_migration)
-        sidebar_layout.addWidget(migrate_library)
-        sidebar_layout.addWidget(export_diagnostics)
-        sidebar_layout.addWidget(clear_logs)
-        sidebar_layout.addWidget(empty_trash)
-        location = QLabel("资料存储于本机", objectName="localOnly")
-        location.setWordWrap(True)
-        sidebar_layout.addWidget(location)
+
+        category_header = QHBoxLayout()
+        category_header.addWidget(QLabel("我的分类", objectName="sectionLabel"))
+        category_header.addStretch()
+        add_category = QPushButton("＋", objectName="addCategoryButton")
+        add_category.setToolTip("新建分类")
+        add_category.setAccessibleName("新建分类")
+        add_category.clicked.connect(self._create_category)
+        category_header.addWidget(add_category)
+        sidebar_layout.addSpacing(16)
+        sidebar_layout.addLayout(category_header)
+        self.category_tree = QTreeWidget(objectName="categoryTree")
+        self.category_tree.setHeaderHidden(True)
+        self.category_tree.setIndentation(18)
+        self.category_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.category_tree.customContextMenuRequested.connect(self._show_category_menu)
+        self.category_tree.currentItemChanged.connect(self._show_category_from_tree)
+        sidebar_layout.addWidget(self.category_tree, stretch=1)
+
+        settings_button = QPushButton("设置与帮助", objectName="settingsButton")
+        settings_menu = QMenu(settings_button)
+        settings_menu.addAction("迁移资料库", self._choose_library_migration)
+        settings_menu.addAction("导出诊断包", self._choose_diagnostics_destination)
+        settings_menu.addAction("重建搜索索引", self._start_reindex)
+        settings_menu.addSeparator()
+        settings_menu.addAction("清除诊断日志", self._clear_diagnostics)
+        settings_menu.addAction("清空回收站", self._empty_trash)
+        settings_button.setMenu(settings_menu)
+        sidebar_layout.addWidget(settings_button)
 
         content = QWidget(objectName="content")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(54, 42, 54, 42)
+        content_layout.setContentsMargins(30, 24, 30, 20)
+        content_layout.setSpacing(14)
         header = QHBoxLayout()
         self.page_title = QLabel("全部文档", objectName="pageTitle")
         header.addWidget(self.page_title)
@@ -128,8 +149,15 @@ class MainWindow(QMainWindow):
         self.search_input.setClearButtonEnabled(True)
         self.search_input.returnPressed.connect(self._search)
         header.addWidget(self.search_input)
+        self.filter_button = QPushButton("筛选", objectName="quietButton")
+        self.filter_button.setCheckable(True)
+        self.filter_button.clicked.connect(self._toggle_filters)
+        header.addWidget(self.filter_button)
         content_layout.addLayout(header)
-        filters = QHBoxLayout()
+
+        self.filter_panel = QFrame(objectName="filterPanel")
+        filters = QHBoxLayout(self.filter_panel)
+        filters.setContentsMargins(12, 10, 12, 10)
         filters.addWidget(QLabel("筛选", objectName="fieldLabel"))
         self.search_category_combo = QComboBox(objectName="searchFilter")
         self.search_category_combo.setMinimumWidth(145)
@@ -149,71 +177,35 @@ class MainWindow(QMainWindow):
         filters.addWidget(self.time_filter)
         filters.addWidget(search_button)
         filters.addStretch()
-        content_layout.addLayout(filters)
-        content_layout.addSpacing(18)
+        self.filter_panel.hide()
+        content_layout.addWidget(self.filter_panel)
 
         actions = QHBoxLayout()
         import_button = QPushButton("导入文档", objectName="primaryButton")
         import_button.clicked.connect(self._choose_files)
         folder_button = QPushButton("导入文件夹", objectName="secondaryButton")
         folder_button.clicked.connect(self._choose_folder)
-        open_button = QPushButton("用 WPS 打开", objectName="secondaryButton")
-        open_button.clicked.connect(self._open_current_in_wps)
-        copy_button = QPushButton("复制正文", objectName="secondaryButton")
-        copy_button.clicked.connect(self._copy_preview)
-        quote_button = QPushButton("复制并附来源", objectName="secondaryButton")
-        quote_button.clicked.connect(self._copy_with_source)
-        export_button = QPushButton("导出", objectName="secondaryButton")
-        export_button.clicked.connect(self._choose_export_directory)
-        trash_button = QPushButton("移入回收站", objectName="dangerButton")
-        trash_button.clicked.connect(lambda: self._move_current_to_trash())
-        restore_button = QPushButton("恢复", objectName="secondaryButton")
-        restore_button.clicked.connect(self._restore_current)
+        more_button = QPushButton("更多", objectName="quietButton")
+        more_menu = QMenu(more_button)
+        more_menu.addAction("自动归类未分类文档", self._auto_classify)
+        more_menu.addAction("导出当前分类", self._choose_category_export)
+        more_button.setMenu(more_menu)
         self.category_combo = QComboBox(objectName="categoryCombo")
-        self.category_combo.setMinimumWidth(150)
         self.category_combo.activated.connect(self._assign_category)
-        category_button = QPushButton("新建分类", objectName="secondaryButton")
-        category_button.clicked.connect(self._create_category)
-        edit_category_button = QPushButton("编辑分类", objectName="secondaryButton")
-        edit_category_button.clicked.connect(self._edit_selected_category)
-        delete_category_button = QPushButton("删除分类", objectName="dangerButton")
-        delete_category_button.clicked.connect(self._delete_selected_category)
-        recommend_button = QPushButton("推荐分类", objectName="primaryButton")
-        recommend_button.clicked.connect(self._recommend_category)
-        export_category_button = QPushButton("导出本分类", objectName="secondaryButton")
-        export_category_button.clicked.connect(self._choose_category_export)
+        self.category_combo.hide()
         self.auto_threshold = QComboBox(objectName="searchFilter")
         self.auto_threshold.addItem("高可信度", "high")
         self.auto_threshold.addItem("中可信度", "medium")
         self.auto_threshold.addItem("低可信度", "low")
-        auto_classify_button = QPushButton("自动归类", objectName="secondaryButton")
-        auto_classify_button.clicked.connect(self._auto_classify)
+        self.auto_threshold.hide()
         actions.addWidget(import_button)
         actions.addWidget(folder_button)
-        actions.addWidget(open_button)
-        actions.addWidget(copy_button)
-        actions.addWidget(quote_button)
-        actions.addWidget(export_button)
-        actions.addWidget(trash_button)
-        actions.addWidget(restore_button)
         actions.addStretch()
+        actions.addWidget(more_button)
         content_layout.addLayout(actions)
-        classification_actions = QHBoxLayout()
-        classification_actions.addWidget(QLabel("当前分类", objectName="fieldLabel"))
-        classification_actions.addWidget(self.category_combo)
-        classification_actions.addWidget(category_button)
-        classification_actions.addWidget(edit_category_button)
-        classification_actions.addWidget(delete_category_button)
-        classification_actions.addWidget(recommend_button)
-        classification_actions.addWidget(export_category_button)
-        classification_actions.addWidget(self.auto_threshold)
-        classification_actions.addWidget(auto_classify_button)
-        classification_actions.addStretch()
-        content_layout.addLayout(classification_actions)
-        content_layout.addSpacing(18)
 
         self.empty_state = QLabel(
-            "这里还没有资料\n\n导入 Word 文档，开始建立可搜索的本地资料库。",
+            "这里还没有资料\n\n导入 Word 文档或文件夹，开始建立本地资料库。",
             objectName="emptyState",
         )
         self.empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -221,13 +213,50 @@ class MainWindow(QMainWindow):
 
         self.document_list = QListWidget(objectName="documentList")
         self.document_list.currentItemChanged.connect(self._show_document)
+        list_panel = QFrame(objectName="documentPanel")
+        list_layout = QVBoxLayout(list_panel)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(8)
+        list_layout.addWidget(QLabel("文档", objectName="paneTitle"))
+        list_layout.addWidget(self.document_list)
+
         self.preview = QTextBrowser(objectName="preview")
         self.preview.setPlaceholderText("选择文档后在此阅读正文")
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.document_list)
-        splitter.addWidget(self.preview)
-        splitter.setSizes([330, 570])
-        content_layout.addWidget(splitter, stretch=1)
+        preview_panel = QFrame(objectName="previewPanel")
+        preview_layout = QVBoxLayout(preview_panel)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(8)
+        preview_actions = QHBoxLayout()
+        preview_actions.addWidget(QLabel("正文预览", objectName="paneTitle"))
+        preview_actions.addStretch()
+        move_button = QPushButton("移动到分类", objectName="quietButton")
+        self.move_category_menu = QMenu(move_button)
+        move_button.setMenu(self.move_category_menu)
+        open_button = QPushButton("用 WPS 打开", objectName="secondaryButton")
+        open_button.clicked.connect(self._open_current_in_wps)
+        copy_button = QPushButton("复制正文", objectName="secondaryButton")
+        copy_button.clicked.connect(self._copy_preview)
+        preview_more = QPushButton("更多", objectName="quietButton")
+        preview_menu = QMenu(preview_more)
+        preview_menu.addAction("复制并附来源", self._copy_with_source)
+        preview_menu.addAction("推荐分类", self._recommend_category)
+        preview_menu.addAction("导出文档", self._choose_export_directory)
+        preview_menu.addSeparator()
+        preview_menu.addAction("移入回收站", self._move_current_to_trash)
+        preview_menu.addAction("从回收站恢复", self._restore_current)
+        preview_more.setMenu(preview_menu)
+        preview_actions.addWidget(move_button)
+        preview_actions.addWidget(open_button)
+        preview_actions.addWidget(copy_button)
+        preview_actions.addWidget(preview_more)
+        preview_layout.addLayout(preview_actions)
+        preview_layout.addWidget(self.preview)
+
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.addWidget(list_panel)
+        self.workspace_splitter.addWidget(preview_panel)
+        self.workspace_splitter.setSizes([360, 620])
+        content_layout.addWidget(self.workspace_splitter, stretch=1)
         content_layout.addWidget(self.empty_state)
 
         index_footer = QHBoxLayout()
@@ -235,14 +264,13 @@ class MainWindow(QMainWindow):
         self.index_progress = QProgressBar()
         self.index_progress.setTextVisible(False)
         self.index_progress.setMaximumWidth(180)
-        rebuild_button = QPushButton("重建索引", objectName="secondaryButton")
-        rebuild_button.clicked.connect(self._start_reindex)
+        self.index_progress.hide()
         self.pause_index_button = QPushButton("暂停", objectName="secondaryButton")
         self.pause_index_button.clicked.connect(self._toggle_index_pause)
         self.pause_index_button.setEnabled(False)
+        self.pause_index_button.hide()
         index_footer.addWidget(self.index_status)
         index_footer.addWidget(self.index_progress)
-        index_footer.addWidget(rebuild_button)
         index_footer.addWidget(self.pause_index_button)
         index_footer.addStretch()
         content_layout.addLayout(index_footer)
@@ -256,53 +284,129 @@ class MainWindow(QMainWindow):
             """
             QMainWindow, QWidget {
                 font-family: "Noto Sans CJK SC", "Microsoft YaHei UI", sans-serif;
+                color: #24343F;
             }
-            QMainWindow, QWidget#content { background: #F3F6F8; color: #172433; }
-            QFrame#archiveSpine { background: #142B3D; border: none; }
-            QLabel#brand { color: #F5FAF8; font-size: 25px; font-weight: 700; line-height: 1.2; }
+            QMainWindow, QWidget#content { background: #F4F7F8; }
+            QFrame#archiveSpine {
+                background: #E8EFF0; border: none; border-right: 1px solid #CFDADC;
+            }
+            QLabel#brand { color: #173E3A; font-size: 23px; font-weight: 700; }
+            QLabel#sectionLabel {
+                color: #607175; font-size: 12px; font-weight: 700;
+            }
             QPushButton#navButton {
-                background: transparent; color: #C7D4DC; border: none;
-                border-left: 3px solid transparent; text-align: left;
-                padding: 11px 12px; font-size: 15px;
+                background: transparent; color: #34494D; border: none;
+                border-radius: 6px; text-align: left; padding: 10px 12px; font-size: 14px;
             }
-            QPushButton#navButton:hover { color: white; border-left-color: #39B48E; }
-            QLabel#localOnly { color: #8299A7; font-size: 12px; }
-            QLabel#pageTitle { color: #172433; font-size: 28px; font-weight: 700; }
-            QLabel#fieldLabel { color: #657580; font-size: 13px; }
-            QLabel#emptyState { color: #61717C; font-size: 15px; line-height: 1.5; }
+            QPushButton#navButton:hover { background: #D7E4E3; color: #173E3A; }
+            QLabel#localOnly { color: #4F746D; font-size: 12px; }
+            QLabel#pageTitle { color: #1F3039; font-size: 25px; font-weight: 700; }
+            QLabel#paneTitle { color: #53656D; font-size: 13px; font-weight: 700; }
+            QLabel#fieldLabel { color: #6A7980; font-size: 12px; }
+            QLabel#emptyState { color: #61717C; font-size: 15px; }
+            QTreeWidget#categoryTree {
+                background: transparent; border: none; color: #34494D; font-size: 14px;
+                outline: none;
+            }
+            QTreeWidget#categoryTree::item { min-height: 34px; border-radius: 5px; }
+            QTreeWidget#categoryTree::item:hover { background: #DCE7E7; }
+            QTreeWidget#categoryTree::item:selected {
+                background: #C9DEDA; color: #123F37;
+            }
+            QPushButton#addCategoryButton {
+                min-width: 30px; max-width: 30px; min-height: 30px; border: none;
+                border-radius: 6px; background: transparent; color: #315E57; font-size: 20px;
+            }
+            QPushButton#addCategoryButton:hover { background: #D4E2E0; }
+            QPushButton#settingsButton {
+                background: transparent; color: #52666A; border: 1px solid #C8D5D6;
+                border-radius: 6px; text-align: left; padding: 9px 12px;
+            }
             QLineEdit#searchInput {
-                min-width: 310px; background: white; border: 1px solid #D5DEE3;
-                border-radius: 7px; padding: 10px 13px; font-size: 14px;
+                min-width: 340px; background: white; border: 1px solid #CBD6DA;
+                border-radius: 8px; padding: 10px 14px; font-size: 14px;
             }
-            QLineEdit#searchInput:focus { border-color: #147D64; }
+            QLineEdit#searchInput:focus { border: 2px solid #247A69; }
+            QFrame#filterPanel {
+                background: #EAF0F2; border: 1px solid #D4DEE1; border-radius: 8px;
+            }
             QComboBox#categoryCombo, QComboBox#searchFilter {
-                background: white; color: #294251; border: 1px solid #CBD6DC;
-                border-radius: 6px; padding: 9px 12px; font-size: 14px;
+                background: white; color: #314650; border: 1px solid #C7D3D7;
+                border-radius: 6px; padding: 8px 11px; font-size: 13px;
             }
             QListWidget#documentList, QTextBrowser#preview {
-                background: white; border: 1px solid #D8E0E5; border-radius: 8px;
-                padding: 8px; font-size: 14px;
+                background: white; border: 1px solid #D4DEE2; border-radius: 8px;
+                padding: 8px; font-size: 14px; selection-background-color: #D6E9E4;
             }
-            QListWidget#documentList::item { padding: 10px; border-radius: 5px; }
-            QListWidget#documentList::item:selected { background: #DCEFE9; color: #103B31; }
+            QListWidget#documentList::item {
+                padding: 12px 10px; border-radius: 5px; border-bottom: 1px solid #EEF2F3;
+            }
+            QListWidget#documentList::item:selected { background: #D6E9E4; color: #123F37; }
             QPushButton#primaryButton {
-                background: #147D64; color: white; border: none; border-radius: 6px;
-                padding: 12px 18px; font-size: 15px; font-weight: 600;
+                background: #176B5B; color: white; border: none; border-radius: 7px;
+                padding: 10px 18px; font-size: 14px; font-weight: 600;
             }
-            QPushButton#primaryButton:hover { background: #0F6B55; }
+            QPushButton#primaryButton:hover { background: #12594C; }
             QPushButton#secondaryButton {
-                background: white; color: #294251; border: 1px solid #CBD6DC;
-                border-radius: 6px; padding: 11px 16px; font-size: 14px;
+                background: white; color: #304852; border: 1px solid #C8D4D8;
+                border-radius: 7px; padding: 9px 13px; font-size: 13px;
             }
-            QPushButton#secondaryButton:hover { border-color: #147D64; color: #147D64; }
-            QPushButton#dangerButton {
-                background: transparent; color: #9B3A3A; border: none; padding: 10px;
+            QPushButton#secondaryButton:hover { border-color: #247A69; color: #176B5B; }
+            QPushButton#quietButton {
+                background: transparent; color: #52666F; border: none; border-radius: 6px;
+                padding: 9px 12px; font-size: 13px;
             }
-            QPushButton#dangerButton:hover { color: #C22F2F; }
-            QPushButton:focus { outline: 2px solid #67CDAE; }
+            QPushButton#quietButton:hover { background: #E4EBED; color: #1C554B; }
+            QPushButton:focus { border: 2px solid #4B9A88; }
+            QMenu {
+                background: white; color: #2C414A; border: 1px solid #CCD7DB;
+                padding: 6px; font-size: 13px;
+            }
+            QMenu::item { padding: 8px 26px 8px 12px; border-radius: 4px; }
+            QMenu::item:selected { background: #DCEBE7; color: #174F44; }
+            QSplitter::handle { background: transparent; width: 10px; }
             """
         )
         self._refresh_categories()
+
+    def _toggle_filters(self, checked: bool) -> None:
+        self.filter_panel.setVisible(checked)
+        self.filter_button.setText("收起筛选" if checked else "筛选")
+
+    def _show_category_from_tree(
+        self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
+    ) -> None:
+        if current is None:
+            return
+        category_id = current.data(0, Qt.ItemDataRole.UserRole)
+        index = self.category_combo.findData(category_id)
+        if index >= 0:
+            self.category_combo.setCurrentIndex(index)
+        self._load_by_where(
+            current.text(0),
+            "status = 'active' AND category_id = ?",
+            (category_id,),
+        )
+
+    def _show_category_menu(self, position) -> None:
+        item = self.category_tree.itemAt(position)
+        if item is not None:
+            self.category_tree.setCurrentItem(item)
+        menu = QMenu(self)
+        menu.addAction("新建子分类", self._create_category)
+        if item is not None:
+            menu.addAction("重命名与关键词", self._edit_selected_category)
+            menu.addAction("导出该分类", self._choose_category_export)
+            menu.addSeparator()
+            menu.addAction("删除分类", self._delete_selected_category)
+        menu.exec(self.category_tree.viewport().mapToGlobal(position))
+
+    def _assign_category_id(self, category_id: str | None) -> None:
+        document_id = self._current_document_id()
+        if document_id is None:
+            return
+        self.classification_service.assign(document_id, category_id)
+        self._show_document(self.document_list.currentItem())
 
     def import_paths(self, paths: list[Path]) -> None:
         failures = 0
@@ -390,8 +494,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, document_id)
             self.document_list.addItem(item)
         has_documents = self.document_list.count() > 0
-        self.document_list.setVisible(has_documents)
-        self.preview.setVisible(has_documents)
+        self.workspace_splitter.setVisible(has_documents)
         self.empty_state.setVisible(not has_documents)
 
     def _load_by_where(self, title: str, where_clause: str, parameters: tuple = ()) -> None:
@@ -413,8 +516,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, document_id)
             self.document_list.addItem(item)
         has_documents = self.document_list.count() > 0
-        self.document_list.setVisible(has_documents)
-        self.preview.setVisible(has_documents)
+        self.workspace_splitter.setVisible(has_documents)
         self.empty_state.setVisible(not has_documents)
 
     def _show_all_documents(self) -> None:
@@ -560,8 +662,14 @@ class MainWindow(QMainWindow):
         self.search_category_combo.blockSignals(True)
         self.category_combo.clear()
         self.search_category_combo.clear()
+        self.category_tree.clear()
+        self.move_category_menu.clear()
         self.category_combo.addItem("未分类", None)
         self.search_category_combo.addItem("全部分类", None)
+        self.move_category_menu.addAction(
+            "未分类", lambda: self._assign_category_id(None)
+        )
+        self.move_category_menu.addSeparator()
         rows = self.database.connection.execute(
             "SELECT id, name, parent_id FROM categories ORDER BY name"
         ).fetchall()
@@ -569,13 +677,30 @@ class MainWindow(QMainWindow):
         for category_id, name, parent_id in rows:
             by_parent.setdefault(parent_id, []).append((category_id, name))
 
-        def add_children(parent_id: str | None, depth: int) -> None:
+        def add_children(
+            parent_id: str | None,
+            depth: int,
+            tree_parent: QTreeWidgetItem | None = None,
+        ) -> None:
             for category_id, name in by_parent.get(parent_id, []):
                 self.category_combo.addItem(f"{'　' * depth}{name}", category_id)
                 self.search_category_combo.addItem(f"{'　' * depth}{name}", category_id)
-                add_children(category_id, depth + 1)
+                tree_item = QTreeWidgetItem([name])
+                tree_item.setData(0, Qt.ItemDataRole.UserRole, category_id)
+                tree_item.setToolTip(0, "单击查看分类；右键管理分类")
+                if tree_parent is None:
+                    self.category_tree.addTopLevelItem(tree_item)
+                else:
+                    tree_parent.addChild(tree_item)
+                action = QAction(f"{'　' * depth}{name}", self.move_category_menu)
+                action.triggered.connect(
+                    lambda _checked=False, item_id=category_id: self._assign_category_id(item_id)
+                )
+                self.move_category_menu.addAction(action)
+                add_children(category_id, depth + 1, tree_item)
 
         add_children(None, 0)
+        self.category_tree.expandAll()
         found = self.category_combo.findData(current)
         search_found = self.search_category_combo.findData(search_current)
         self.category_combo.setCurrentIndex(max(0, found))
@@ -745,10 +870,14 @@ class MainWindow(QMainWindow):
 
     def _start_reindex(self) -> None:
         progress = self.indexing_job.start()
+        self.index_progress.show()
+        self.pause_index_button.show()
         self.index_progress.setRange(0, max(1, progress.total))
         self.index_progress.setValue(0)
         if progress.state is IndexingState.COMPLETED:
             self.index_status.setText("没有需要索引的文档")
+            self.index_progress.hide()
+            self.pause_index_button.hide()
             return
         self.pause_index_button.setEnabled(True)
         self.pause_index_button.setText("暂停")
@@ -764,6 +893,8 @@ class MainWindow(QMainWindow):
         if progress.state is IndexingState.COMPLETED:
             self.index_timer.stop()
             self.pause_index_button.setEnabled(False)
+            self.index_progress.hide()
+            self.pause_index_button.hide()
             self.index_status.setText(
                 f"索引完成 · 成功 {progress.successful} · 失败 {progress.failed}"
             )

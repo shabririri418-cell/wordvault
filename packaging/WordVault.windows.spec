@@ -12,7 +12,9 @@ analysis = Analysis(
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[
+        str(project_root / "packaging" / "runtime_hooks" / "windows_qt_software.py")
+    ],
     excludes=[],
     noarchive=False,
     optimize=0,
@@ -30,10 +32,9 @@ pyz = PYZ(analysis.pure)
 exe = EXE(
     pyz,
     analysis.scripts,
-    analysis.binaries,
-    analysis.datas,
     [],
-    name="文澜资料库",
+    exclude_binaries=True,
+    name="_WordVaultCore",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -46,4 +47,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+collect = COLLECT(
+    exe,
+    analysis.binaries,
+    analysis.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="文澜资料库-Windows预览版",
 )

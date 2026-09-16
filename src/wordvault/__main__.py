@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 from pathlib import Path
 
 
+def _configure_qt_runtime(
+    platform: str = sys.platform, environment: MutableMapping[str, str] = os.environ
+) -> None:
+    if platform == "win32":
+        environment.setdefault("QT_OPENGL", "software")
+        environment.setdefault("QT_QUICK_BACKEND", "software")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_qt_runtime()
     parser = argparse.ArgumentParser(prog="wordvault")
     parser.add_argument("--self-check", action="store_true", help="运行离线环境自检")
     parser.add_argument("--gui-smoke-test", action="store_true", help=argparse.SUPPRESS)

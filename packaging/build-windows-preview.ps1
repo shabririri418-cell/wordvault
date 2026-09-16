@@ -8,7 +8,9 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $OutputRoot = Join-Path $ProjectRoot $OutputDirectory
 $BuildRoot = Join-Path $ProjectRoot "build/windows-preview"
-$Executable = Join-Path $BuildRoot "文澜资料库.exe"
+$AppRoot = Join-Path $BuildRoot "文澜资料库-Windows预览版"
+$Executable = Join-Path $AppRoot "文澜资料库.exe"
+$LauncherBuildRoot = Join-Path $ProjectRoot "build/windows-launcher"
 $VenvRoot = Join-Path $ProjectRoot ".venv-windows-build"
 $BuildPython = Join-Path $VenvRoot "Scripts/python.exe"
 
@@ -35,12 +37,20 @@ try {
     & $BuildPython -m PyInstaller --noconfirm --clean `
         --distpath $BuildRoot --workpath (Join-Path $BuildRoot "work") `
         (Join-Path $ProjectRoot "packaging/WordVault.windows.spec")
+    if ($LASTEXITCODE -ne 0) { throw "Windows 主程序构建失败。" }
+    & $BuildPython -m PyInstaller --noconfirm --clean --onefile --windowed `
+        --name "文澜资料库" --distpath $LauncherBuildRoot `
+        --workpath (Join-Path $LauncherBuildRoot "work") `
+        --specpath (Join-Path $LauncherBuildRoot "spec") `
+        (Join-Path $ProjectRoot "src/wordvault/windows_launcher.py")
+    if ($LASTEXITCODE -ne 0) { throw "Windows 兼容启动器构建失败。" }
 } finally {
     $env:PATH = $OriginalPath
 }
-if ($LASTEXITCODE -ne 0) { throw "Windows 预览版构建失败。" }
+Copy-Item -LiteralPath (Join-Path $LauncherBuildRoot "文澜资料库.exe") `
+    -Destination $Executable -Force
 
-$PackageToc = Join-Path $BuildRoot "work/WordVault.windows/PKG-00.toc"
+$PackageToc = Join-Path $BuildRoot "work/WordVault.windows/COLLECT-00.toc"
 $UnsafeRuntime = Select-String -LiteralPath $PackageToc `
     -Pattern "native\\\\libheif|\('ucrtbase\.dll'," -Quiet
 if ($UnsafeRuntime) {
@@ -51,6 +61,8 @@ $Archive = Join-Path $OutputRoot "文澜资料库-Windows预览测试包.zip"
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
 $Readme = Join-Path $ProjectRoot "acceptance/README.md"
 $Samples = Join-Path $ProjectRoot "acceptance/samples"
-Compress-Archive -Path $Executable, $Readme, $Samples `
+Copy-Item -LiteralPath $Readme -Destination (Join-Path $AppRoot "使用说明.md") -Force
+Copy-Item -LiteralPath $Samples -Destination $AppRoot -Recurse -Force
+Compress-Archive -Path $AppRoot `
     -DestinationPath $Archive -CompressionLevel Optimal
 Write-Host "已生成 $Archive"

@@ -23,12 +23,29 @@ if (-not (Test-Path $BuildPython)) {
     -r (Join-Path $ProjectRoot "requirements-build-windows.txt")
 if ($LASTEXITCODE -ne 0) { throw "Windows 构建依赖安装失败。" }
 
-& $BuildPython -m PyInstaller --noconfirm --clean --windowed --onefile `
-    --name "文澜资料库" --paths (Join-Path $ProjectRoot "src") `
-    --distpath $BuildRoot --workpath (Join-Path $BuildRoot "work") `
-    --specpath (Join-Path $BuildRoot "spec") `
-    (Join-Path $ProjectRoot "src/wordvault/__main__.py")
+$OriginalPath = $env:PATH
+$PythonHome = Split-Path -Parent $PythonExecutable
+$env:PATH = @(
+    (Join-Path $VenvRoot "Scripts")
+    $PythonHome
+    (Join-Path $env:SystemRoot "System32")
+    $env:SystemRoot
+) -join ";"
+try {
+    & $BuildPython -m PyInstaller --noconfirm --clean `
+        --distpath $BuildRoot --workpath (Join-Path $BuildRoot "work") `
+        (Join-Path $ProjectRoot "packaging/WordVault.windows.spec")
+} finally {
+    $env:PATH = $OriginalPath
+}
 if ($LASTEXITCODE -ne 0) { throw "Windows 预览版构建失败。" }
+
+$PackageToc = Join-Path $BuildRoot "work/WordVault.windows/PKG-00.toc"
+$UnsafeRuntime = Select-String -LiteralPath $PackageToc `
+    -Pattern "native\\\\libheif|\('ucrtbase\.dll'," -Quiet
+if ($UnsafeRuntime) {
+    throw "发现外部工具的 Windows 运行库，已阻止发布。"
+}
 
 $Archive = Join-Path $OutputRoot "文澜资料库-Windows预览测试包.zip"
 Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue

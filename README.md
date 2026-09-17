@@ -10,10 +10,10 @@
 
 请从 GitHub Releases 下载：
 
-- `文澜资料库-Windows预览测试包.zip`：Windows 10/11 x64 预览测试版。
-- `文澜资料库-银河麒麟ARM64-双击安装.tar.gz`：银河麒麟 ARM64 一键安装包。
+- `WordVault-Windows-x64-preview-v0.1.0.zip`：Windows 10/11 x64 预览测试版。
+- `WordVault-Kylin-ARM64-v0.1.0.tar.gz`：银河麒麟 ARM64 一键安装包。
 - `wordvault_0.1.0_arm64.deb`：提供给 Linux 管理员的原始 Debian 安装包。
-- `文澜资料库-操作与功能测试手册.docx`：安装、操作和现场验收手册。
+- `WordVault-User-and-Acceptance-Manual-zh-CN-v0.1.0.docx`：安装、操作和现场验收手册。
 
 > ARM64 包通过 Debian 11/glibc 2.31 基线和 QEMU AArch64 环境构建验证，
 > 仍建议在实际银河麒麟设备上完成最终验收。Windows 包为预览测试版。

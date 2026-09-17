@@ -4,10 +4,10 @@
 
 ## 下载选择
 
-- **Windows 10/11 x64**：下载 `文澜资料库-Windows预览测试包.zip`，解压后双击程序。
-- **银河麒麟 V10 / 飞腾 ARM64**：下载 `文澜资料库-银河麒麟ARM64-双击安装.tar.gz`，解压后双击安装图标。
+- **Windows 10/11 x64**：下载 `WordVault-Windows-x64-preview-v0.1.0.zip`，解压后双击程序。
+- **银河麒麟 V10 / 飞腾 ARM64**：下载 `WordVault-Kylin-ARM64-v0.1.0.tar.gz`，解压后双击安装图标。
 - **Linux 管理员**：可直接下载 `wordvault_0.1.0_arm64.deb`。
-- **操作与验收**：下载 `文澜资料库-操作与功能测试手册.docx`。
+- **操作与验收**：下载 `WordVault-User-and-Acceptance-Manual-zh-CN-v0.1.0.docx`。
 
 ## 主要功能
 
@@ -36,10 +36,10 @@
 ## SHA-256
 
 ```text
-008e56d5a8de007a71c1bd147768b448716cc12c971587b595e66ffd6f189860  文澜资料库-Windows预览测试包.zip
-0c087674424745149456d241f593abd7e28d8f69100611d9121c993216c35b5d  文澜资料库-银河麒麟ARM64-双击安装.tar.gz
+008e56d5a8de007a71c1bd147768b448716cc12c971587b595e66ffd6f189860  WordVault-Windows-x64-preview-v0.1.0.zip
+0c087674424745149456d241f593abd7e28d8f69100611d9121c993216c35b5d  WordVault-Kylin-ARM64-v0.1.0.tar.gz
 e236d14cd5c2f3802e31727396830632f595632cac5c9fe839ca9f27b18ea01d  wordvault_0.1.0_arm64.deb
-d3bb05818fbaf348bc1a57392ce4dc53015bcc7610a728bffbe428867e33690e  文澜资料库-操作与功能测试手册.docx
+d3bb05818fbaf348bc1a57392ce4dc53015bcc7610a728bffbe428867e33690e  WordVault-User-and-Acceptance-Manual-zh-CN-v0.1.0.docx
 ```
 
 报告问题时请勿上传真实业务文档、正文、文件名、文件路径、分类名称或敏感截图。
